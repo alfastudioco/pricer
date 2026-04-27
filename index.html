@@ -832,7 +832,8 @@ const getMFCRetail = (item, finish) => {
   return item.tier2;
 };
 
-// Your cost = MFC retail × 0.25 (75% off Modernform)
+// Your cost = MFC retail × 0.25 (you buy from Modernform at 75% off)
+// Display only — independent of sell price
 const getCost = (item, finish) => {
   if (!item || TIER_PAINT_FINISHES.includes(finish)) return null;
   return Math.round(getMFCRetail(item, finish) * MFC_COST_MULT * 100) / 100;
@@ -1986,7 +1987,7 @@ Respond ONLY with valid JSON — no markdown, no backticks, no explanation:
             const headers = { "Content-Type": "application/json" };
             if (scanImage.isPdf) headers["anthropic-beta"] = "pdfs-2024-09-25";
 
-            const resp = await fetch("https://api.anthropic.com/v1/messages", {
+            const resp = await fetch("/api/claude", {
               method: "POST",
               headers,
               body: JSON.stringify({
