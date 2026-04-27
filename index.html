@@ -1337,27 +1337,32 @@ function App() {
                 </div>
                 <div style={{ display: "flex", gap: 6 }}>
                   {!isPaint && (
-                    <div style={{ flex: 1, background: "#F0F7F2", borderRadius: 8, padding: "9px 10px", border: "1px solid #C8E6D0" }}>
-                      <div style={{ fontSize: 8, letterSpacing: 1.5, color: "#4a7c59", marginBottom: 3 }}>YOUR COST</div>
-                      <div style={{ fontSize: 16, fontWeight: 600, color: "#4a7c59" }}>{fmt(getCost(item, finish))}</div>
+                    <div style={{ flex: 1, background: "#F0F7F2", borderRadius: 8, padding: "10px 12px", border: "1.5px solid #A8D5B5" }}>
+                      <div style={{ fontSize: 9, letterSpacing: 1.5, color: "#4a7c59", marginBottom: 4, fontWeight: 600 }}>YOUR COST</div>
+                      <div style={{ fontSize: 18, fontWeight: 700, color: "#2d6b45", lineHeight: 1 }}>{fmt(getCost(item, finish))}</div>
                     </div>
                   )}
-                  <div style={{ flex: 1, background: isPaint ? "#F5F0FA" : "#1a1a1a", borderRadius: 8, padding: "9px 10px", border: isPaint ? "1.5px solid #C4A8E0" : "none" }}>
-                    <div style={{ fontSize: 8, letterSpacing: 1.5, color: isPaint ? "#7B4F9E" : "#C4956A", marginBottom: 3 }}>
+                  <div style={{ flex: isPaint ? 2 : 1, background: isPaint ? "#F5F0FA" : "#1a1a1a", borderRadius: 8, padding: "10px 12px", border: isPaint ? "1.5px solid #C4A8E0" : "none" }}>
+                    <div style={{ fontSize: 9, letterSpacing: 1.5, color: isPaint ? "#7B4F9E" : "#C4956A", marginBottom: 4, fontWeight: 600 }}>
                       {isPaint ? "SELL PRICE" : "YOUR SELL"}
                     </div>
-                    <div style={{ fontSize: 16, fontWeight: 600, color: isPaint ? "#7B4F9E" : "#C4956A" }}>{fmt(getSellPrice(item, finish))}</div>
+                    <div style={{ fontSize: 18, fontWeight: 700, color: isPaint ? "#7B4F9E" : "#C4956A", lineHeight: 1 }}>{fmt(getSellPrice(item, finish))}</div>
+                    {!isPaint && getCost(item, finish) > 0 && (
+                      <div style={{ fontSize: 9, color: "#C4956A", opacity: 0.6, marginTop: 3 }}>
+                        {Math.round((getSellPrice(item, finish) - getCost(item, finish)) / getSellPrice(item, finish) * 100)}% margin
+                      </div>
+                    )}
                   </div>
                   {!isPaint && (
-                    <div style={{ flex: 1, background: "#FEF3EB", borderRadius: 8, padding: "9px 10px", border: "1px solid #F0C89A" }}>
-                      <div style={{ fontSize: 8, letterSpacing: 1.5, color: "#8B5E3C", marginBottom: 3 }}>J&K PRICE</div>
-                      <div style={{ fontSize: 16, fontWeight: 600, color: "#8B5E3C" }}>{getJKPrice(item, finish) ? fmt(getJKPrice(item, finish)) : "—"}</div>
+                    <div style={{ flex: 1, background: "#FEF3EB", borderRadius: 8, padding: "10px 12px", border: "1.5px solid #F0C89A" }}>
+                      <div style={{ fontSize: 9, letterSpacing: 1.5, color: "#8B5E3C", marginBottom: 4, fontWeight: 600 }}>J&K PRICE</div>
+                      <div style={{ fontSize: 18, fontWeight: 700, color: "#8B5E3C", lineHeight: 1 }}>{getJKPrice(item, finish) ? fmt(getJKPrice(item, finish)) : "—"}</div>
                     </div>
                   )}
                   {isPaint && (
-                    <div style={{ flex: 1, background: "#F5F0FA", borderRadius: 8, padding: "9px 10px", border: "1.5px solid #C4A8E0" }}>
-                      <div style={{ fontSize: 8, letterSpacing: 1.5, color: "#7B4F9E", marginBottom: 3 }}>MFC RETAIL REF</div>
-                      <div style={{ fontSize: 16, fontWeight: 600, color: "#7B4F9E", opacity: 0.5, textDecoration: "line-through" }}>{fmt(item.tier1)}</div>
+                    <div style={{ flex: 1, background: "#F5F0FA", borderRadius: 8, padding: "10px 12px", border: "1.5px solid #C4A8E0" }}>
+                      <div style={{ fontSize: 9, letterSpacing: 1.5, color: "#7B4F9E", marginBottom: 4, fontWeight: 600 }}>MFC REF</div>
+                      <div style={{ fontSize: 18, fontWeight: 700, color: "#7B4F9E", opacity: 0.5, textDecoration: "line-through", lineHeight: 1 }}>{fmt(item.tier1)}</div>
                     </div>
                   )}
                 </div>
@@ -1501,10 +1506,14 @@ function App() {
                       <div style={{ flex: 1, minWidth: 0 }}>
                         <div style={{ fontSize: 10, color: "#8B7355", fontWeight: 500 }}>{item.id}</div>
                         <div style={{ fontSize: 12, lineHeight: 1.4 }}>{item.description}</div>
-                        <div style={{ fontSize: 10, color: "#aaa", marginTop: 2 }}>
+                        <div style={{ display: "flex", gap: 5, marginTop: 5, flexWrap: "wrap" }}>
                           {TIER_PAINT_FINISHES.includes(item.finish)
-                            ? <span style={{ color: "#7B4F9E", fontWeight: 600 }}>Paint Grade</span>
-                            : <>Cost {item.cost ? fmt(item.cost) : "—"} · Sell {fmt(item.price)} · J&K {item.jkPrice ? fmt(item.jkPrice) : "—"}</>
+                            ? <span style={{ fontSize: 11, color: "#7B4F9E", fontWeight: 700, background: "#F5F0FA", padding: "3px 8px", borderRadius: 6 }}>PAINT GRADE · {fmt(item.price)}</span>
+                            : (<>
+                                <span style={{ fontSize: 12, fontWeight: 700, color: "#2d6b45", background: "#EBF5EF", padding: "3px 9px", borderRadius: 6 }}>Cost {item.cost ? fmt(item.cost) : "—"}</span>
+                                <span style={{ fontSize: 12, fontWeight: 700, color: "#C4956A", background: "#1a1a1a", padding: "3px 9px", borderRadius: 6 }}>Sell {fmt(item.price)}</span>
+                                {item.jkPrice && <span style={{ fontSize: 12, fontWeight: 600, color: "#8B5E3C", background: "#FEF3EB", padding: "3px 9px", borderRadius: 6, border: "1px solid #F0C89A" }}>J&K {fmt(item.jkPrice)}</span>}
+                              </>)
                           }
                         </div>
                       </div>
@@ -1539,29 +1548,42 @@ function App() {
               {/* Summary — totals + J&K in one card */}
               <div style={{ background: "#fff", borderRadius: 12, border: "1px solid #E5DFD6", overflow: "hidden", marginBottom: 12 }}>
                 <div style={{ padding: "14px 16px" }}>
+                  {/* Cost vs Sell row — the main event */}
+                  {!cart.every(c => TIER_PAINT_FINISHES.includes(c.finish)) && (
+                    <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
+                      <div style={{ flex: 1, background: "#EBF5EF", borderRadius: 10, padding: "12px 14px", border: "1.5px solid #A8D5B5" }}>
+                        <div style={{ fontSize: 9, letterSpacing: 1.5, color: "#2d6b45", fontWeight: 700, marginBottom: 4 }}>YOUR COST</div>
+                        <div style={{ fontSize: 22, fontWeight: 800, color: "#2d6b45", lineHeight: 1 }}>{fmt(totalCost)}</div>
+                        <div style={{ fontSize: 9, color: "#2d6b45", opacity: 0.6, marginTop: 3 }}>incl. assembly + shipping</div>
+                      </div>
+                      <div style={{ flex: 1, background: "#1a1a1a", borderRadius: 10, padding: "12px 14px" }}>
+                        <div style={{ fontSize: 9, letterSpacing: 1.5, color: "#C4956A", fontWeight: 700, marginBottom: 4 }}>YOUR SELL</div>
+                        <div style={{ fontSize: 22, fontWeight: 800, color: "#C4956A", lineHeight: 1 }}>{fmt(totalSell)}</div>
+                        <div style={{ fontSize: 9, color: "#C4956A", opacity: 0.6, marginTop: 3 }}>{marginPct}% margin · {fmt(totalProfit)} profit</div>
+                      </div>
+                    </div>
+                  )}
+                  {cart.every(c => TIER_PAINT_FINISHES.includes(c.finish)) && (
+                    <div style={{ background: "#F5F0FA", borderRadius: 10, padding: "12px 14px", border: "1.5px solid #C4A8E0", marginBottom: 12 }}>
+                      <div style={{ fontSize: 9, letterSpacing: 1.5, color: "#7B4F9E", fontWeight: 700, marginBottom: 4 }}>PAINT GRADE TOTAL</div>
+                      <div style={{ fontSize: 22, fontWeight: 800, color: "#7B4F9E", lineHeight: 1 }}>{fmt(totalSell)}</div>
+                    </div>
+                  )}
+                  {/* Line items */}
                   {[
                     ["Cabinets", fmt(cartSell)],
                     [`Assembly (${cartCount} × $20)`, fmt(assemblyFee)],
                     ["Shipping", fmt(shippingFee)],
                   ].map(([l, v]) => (
-                    <div key={l} style={{ display: "flex", justifyContent: "space-between", marginBottom: 10, fontSize: 12 }}>
-                      <span style={{ opacity: 0.5 }}>{l}</span><span>{v}</span>
+                    <div key={l} style={{ display: "flex", justifyContent: "space-between", marginBottom: 6, fontSize: 12 }}>
+                      <span style={{ opacity: 0.4 }}>{l}</span><span style={{ opacity: 0.7 }}>{v}</span>
                     </div>
                   ))}
-                  <div style={{ height: 1, background: "#EDE9E2", margin: "4px 0 12px" }} />
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
-                    <div>
-                      <div style={{ fontSize: 13, fontWeight: 600 }}>Your Total</div>
-                      {!cart.every(c => TIER_PAINT_FINISHES.includes(c.finish)) && (
-                        <div style={{ fontSize: 10, color: "#4a7c59", marginTop: 2 }}>Profit {fmt(totalProfit)} · {marginPct}% margin</div>
-                      )}
-                    </div>
-                    <div style={{ fontFamily: "'Playfair Display', serif", fontSize: 26, color: "#C4956A" }}>{fmt(totalSell)}</div>
-                  </div>
+                  {/* J&K comparison */}
                   {!cart.every(c => TIER_PAINT_FINISHES.includes(c.finish)) && cartJK > 0 && (
-                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 12px", background: "#F5F2ED", borderRadius: 8, fontSize: 12 }}>
-                      <span style={{ opacity: 0.5 }}>J&K would charge {fmt(jkTotal)}</span>
-                      <span style={{ color: "#4a7c59", fontWeight: 600 }}>Client saves {fmt(clientSavings)}</span>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 12px", background: "#FEF3EB", borderRadius: 8, fontSize: 12, marginTop: 10, border: "1px solid #F0C89A" }}>
+                      <span style={{ color: "#8B5E3C" }}>J&K charges clients <strong>{fmt(jkTotal)}</strong></span>
+                      <span style={{ color: "#2d6b45", fontWeight: 700 }}>↓ {fmt(clientSavings)} savings</span>
                     </div>
                   )}
                 </div>
