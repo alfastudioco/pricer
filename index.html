@@ -1509,7 +1509,7 @@ function App() {
                         <CabinetIcon id={item.id} description={item.description} finish={item.finish} />
                       </div>
                       <div style={{ flex: 1, minWidth: 0 }}>
-                        <div style={{ fontSize: 10, color: "#8B7355", fontWeight: 500 }}>{item.id}</div>
+                        <div style={{ fontSize: 10, color: "#8B7355", fontWeight: 500 }}>{item.id}{item.isCustom && <span style={{ marginLeft: 6, fontSize: 9, background: "#FEF3EB", color: "#C4956A", padding: "1px 6px", borderRadius: 6, border: "1px solid #F0C89A" }}>CUSTOM SIZE · $/ft³</span>}</div>
                         <div style={{ fontSize: 12, lineHeight: 1.4 }}>{item.description}</div>
                         <div style={{ display: "flex", gap: 5, marginTop: 5, flexWrap: "wrap" }}>
                           {TIER_PAINT_FINISHES.includes(item.finish)
@@ -2296,16 +2296,47 @@ Respond ONLY with valid JSON — no markdown, no backticks:
             if (scanExcluded.has(i)) return;
             const snapped = { ...scanned, width: snapWidth(scanned.width) };
             const match = matchCatalog(snapped);
-            if (!match) return;
             const qty = scanned.qty || 1;
-            const sell = getSellPrice(match, scanFinish);
-            const cost = getCost(match, scanFinish);
-            const jk   = getJKPrice(match, scanFinish);
-            itemsToAdd.push({ ...match, finish: scanFinish, price: sell, cost, jkPrice: jk, qty });
+
+            if (match) {
+              // Standard catalog match
+              itemsToAdd.push({
+                ...match,
+                finish: scanFinish,
+                price: getSellPrice(match, scanFinish),
+                cost:  getCost(match, scanFinish),
+                jkPrice: getJKPrice(match, scanFinish),
+                qty,
+              });
+            } else {
+              // No catalog match — price via cubic feet, create custom SKU
+              const est = estimatePrice(snapped);
+              if (!est) return;
+              const typePrefix = {
+                vanity: "VB", vanity_drawer: "VDB", base: "B", drawer_base: "DB",
+                sink_base: "SB", wall: "W", pantry: "PC", tall: "PC",
+                blind_corner: "BBC", lazy_susan: "BLS",
+              }[scanned.type] || "CAB";
+              const customId = `${typePrefix}${snapped.width || scanned.width}-CUSTOM`;
+              const customDesc = `${snapped.width || scanned.width}" ${(scanned.type || "cabinet").replace(/_/g," ")} (custom size)`;
+              itemsToAdd.push({
+                id: customId,
+                description: customDesc,
+                category: "Custom",
+                tier1: est.retail,
+                tier2: est.retail,
+                finish: scanFinish,
+                price: est.sell,
+                cost:  est.cost,
+                jkPrice: null,
+                qty,
+                isCustom: true,
+                cubicFt: est.cf,
+              });
+            }
           });
 
           if (itemsToAdd.length > 0) {
-            // Single batched update — merge with any existing items
             setQuotes(prev => prev.map(q => {
               if (q.id !== activeQuoteId) return q;
               let items = [...q.items];
@@ -2826,6 +2857,67 @@ Respond ONLY with valid JSON — no markdown, no backticks:
           </div>
         </div>
       )}
+
+      {/* ── SWAP SKU SHEET ── */}
+      {replacingItem !== null && (() => {
+        const currentItem = cart[replacingItem];
+        const q = swapSearch.toLowerCase();
+        const swapResults = cabinets.filter(c =>
+          !q || c.id.toLowerCase().includes(q) || c.description.toLowerCase().includes(q)
+        ).slice(0, 50);
+        return (
+          <div className="sheet-overlay" onClick={() => { setReplacingItem(null); setSwapSearch(""); }}>
+            <div className="sheet" onClick={e => e.stopPropagation()}>
+              <div className="sheet-handle" />
+              <div style={{ padding: "0 16px 10px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <div>
+                  <div style={{ fontSize: 14, fontWeight: 700 }}>Swap SKU</div>
+                  <div style={{ fontSize: 10, color: "#8B7355", marginTop: 2 }}>Currently: {currentItem?.id} — {currentItem?.description}</div>
+                </div>
+                <button onClick={() => { setReplacingItem(null); setSwapSearch(""); }} style={{ border: "none", background: "none", fontSize: 20, cursor: "pointer", color: "#ccc" }}>×</button>
+              </div>
+              <div style={{ padding: "0 16px 10px", position: "relative" }}>
+                <span style={{ position: "absolute", left: 28, top: "50%", transform: "translateY(-50%)", opacity: 0.4, fontSize: 14 }}>🔍</span>
+                <input
+                  autoFocus
+                  value={swapSearch}
+                  onChange={e => setSwapSearch(e.target.value)}
+                  placeholder="Search item # or description..."
+                  style={{ width: "100%", padding: "10px 12px 10px 34px", border: "1.5px solid #D4CBB8", borderRadius: 8, fontSize: 13, fontFamily: "inherit", background: "#F5F2ED" }}
+                />
+              </div>
+              <div style={{ overflowY: "auto", maxHeight: "55vh", padding: "0 12px 16px" }}>
+                {swapResults.map(c => {
+                  const isCurrent = c.id === currentItem?.id;
+                  const currentFinish = currentItem?.finish || finish;
+                  return (
+                    <div key={c.id} onClick={() => !isCurrent && swapCartItem(replacingItem, c)} style={{
+                      display: "flex", gap: 10, alignItems: "center", padding: "10px",
+                      borderRadius: 8, marginBottom: 4,
+                      cursor: isCurrent ? "default" : "pointer",
+                      background: isCurrent ? "#F0F7F2" : "#fff",
+                      border: `1px solid ${isCurrent ? "#C8E6D0" : "#EDE9E2"}`,
+                    }}>
+                      <div style={{ flexShrink: 0, background: "#F5F2ED", borderRadius: 6, padding: "4px", overflow: "hidden" }}>
+                        <CabinetIcon id={c.id} description={c.description} finish={currentFinish} />
+                      </div>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontSize: 10, color: "#8B7355", fontWeight: 600 }}>{c.id}</div>
+                        <div style={{ fontSize: 12, lineHeight: 1.3 }}>{c.description}</div>
+                      </div>
+                      <div style={{ textAlign: "right", flexShrink: 0 }}>
+                        <div style={{ fontSize: 12, color: "#C4956A", fontWeight: 600 }}>{fmt(getSellPrice(c, currentFinish))}</div>
+                        <div style={{ fontSize: 9, opacity: 0.4 }}>sell</div>
+                      </div>
+                      {isCurrent && <span style={{ fontSize: 11, color: "#4a7c59", fontWeight: 700 }}>✓</span>}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
       {/* ── FINISH CHANGE CONFIRMATION ── */}
       {pendingFinishChange && (() => {
