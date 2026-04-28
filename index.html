@@ -851,8 +851,12 @@ const getSellPrice = (item, finish) => {
     return cost ? Math.round(cost * 2.0) : 0;
   }
   const ndp = getNDP(item, finish);
-  if (ndp) return Math.round(ndp * JK_SELL_MULT * 100) / 100;
-  return Math.round(getMFCRetail(item, finish) * 0.35 * JK_SELL_MULT * 100) / 100;
+  if (!ndp) return Math.round(getMFCRetail(item, finish) * 0.35 * JK_SELL_MULT * 100) / 100;
+  const sell = Math.round(ndp * JK_SELL_MULT * 100) / 100;
+  const cost = getCost(item, finish);
+  // If NDP×0.92 falls below your MFC cost, sell at 1% below JK instead
+  if (cost && sell <= cost) return Math.round(ndp * 0.99 * 100) / 100;
+  return sell;
 };
 
 // J&K price = NDP (not applicable for box or paint)
@@ -1958,25 +1962,32 @@ function App() {
           setScanResult(null);
           setScanExcluded(new Set());
           try {
-            const prompt = `You are analyzing a kitchen cabinet layout drawing, floor plan, elevation, or design document.
+            const prompt = `You are analyzing a cabinet elevation drawing, floor plan, or design document.
 
-Identify ALL cabinets shown and return structured JSON. For each cabinet identify:
-1. type: "base" | "wall" | "pantry" | "vanity" | "drawer_base" | "sink_base" | "blind_corner" | "lazy_susan" | "diagonal_corner" | "microwave" | "tall" | "accessory"
-2. width in inches (common: 9,12,15,18,21,24,27,30,33,36,42)
-3. height in inches for wall cabinets (common: 12,15,18,21,24,30,36,42) — null for base
-4. qty (default 1)
-5. location label if visible (e.g. "sink wall", "island", "upper left")
-6. style_notes if visible (shaker, flat panel, etc.)
+CRITICAL RULES:
+- Only detect cabinets that are EXPLICITLY VISIBLE in the image. Do NOT infer or add cabinets that are not shown.
+- If there are no wall/upper cabinets visible, do not include any. If there are no base cabinets visible, do not include any.
+- Read all dimension labels carefully (e.g. "39", "23 3/4", "34 1/2") and use them as the width in inches.
+- Vanity cabinets are bathroom base cabinets (typically 34.5" tall). Identify as type "vanity" if it's a bathroom layout.
+- A cabinet with two doors and no drawers = "vanity" or "base". A center section with drawers = "drawer_base" or "vanity_drawer".
+
+For each cabinet ACTUALLY SHOWN, identify:
+1. type: "base" | "wall" | "pantry" | "vanity" | "vanity_drawer" | "drawer_base" | "sink_base" | "blind_corner" | "lazy_susan" | "diagonal_corner" | "microwave" | "tall"
+2. width in inches — read from dimension labels if present, otherwise estimate
+3. height in inches for wall cabinets only — null for base/vanity
+4. qty
+5. location (e.g. "left", "center", "right")
+6. style_notes (shaker, flat panel, etc.)
 7. confidence: "high" | "medium" | "low"
-8. description: human-readable label like "30\\" Base Cabinet"
+8. description: e.g. '39" Vanity Base' or '24" Drawer Base'
 
-Respond ONLY with valid JSON — no markdown, no backticks, no explanation:
+Respond ONLY with valid JSON — no markdown, no backticks:
 {
-  "cabinets": [{"type":"base","width":24,"height":null,"qty":1,"location":"sink run","style_notes":"shaker","confidence":"high","description":"24\\" Base Cabinet"}],
-  "layout_notes": "One sentence summary of what was detected",
-  "total_upper_lft": 10.5,
-  "total_lower_lft": 12.0,
-  "rooms_detected": ["kitchen"]
+  "cabinets": [{"type":"vanity","width":39,"height":null,"qty":2,"location":"left and right","style_notes":"shaker","confidence":"high","description":"39\\" Vanity Base Cabinet"},{"type":"vanity_drawer","width":24,"height":null,"qty":1,"location":"center","style_notes":"shaker","confidence":"high","description":"24\\" Vanity Drawer Base"}],
+  "layout_notes": "One sentence summary of what is visible",
+  "total_upper_lft": 0,
+  "total_lower_lft": 8.5,
+  "rooms_detected": ["bathroom"]
 }`;
 
             // Build content block
@@ -2135,9 +2146,13 @@ Respond ONLY with valid JSON — no markdown, no backticks, no explanation:
             vanity: (c) => {
               if (c.category !== "Vanity Cabinets") return false;
               if (!c.description.includes(`${w}"`)) return false;
-              // drawer_base type → prefer drawer vanity
               if (drawerCount) return c.description.toLowerCase().includes("drawer");
               return true;
+            },
+            vanity_drawer: (c) => {
+              if (c.category !== "Vanity Cabinets") return false;
+              if (!c.description.includes(`${w}"`)) return false;
+              return c.description.toLowerCase().includes("drawer");
             },
 
             blind_corner: (c) =>
