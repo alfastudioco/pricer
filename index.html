@@ -2282,22 +2282,45 @@ Respond ONLY with valid JSON — no markdown, no backticks:
           });
         };
 
+        // Round fractional widths up to nearest standard cabinet size
+        const snapWidth = (w) => {
+          if (!w) return w;
+          const standards = [9,12,15,18,21,24,27,30,33,36,39,42,48];
+          return standards.find(s => s >= w) || Math.round(w);
+        };
+
         const addAllToQuote = () => {
           if (!scanResult?.cabinets) return;
-          const tier = finishTier(scanFinish);
+          const itemsToAdd = [];
           scanResult.cabinets.forEach((scanned, i) => {
             if (scanExcluded.has(i)) return;
-            const match = matchCatalog(scanned);
+            const snapped = { ...scanned, width: snapWidth(scanned.width) };
+            const match = matchCatalog(snapped);
             if (!match) return;
-            const price = match[tier];
             const qty = scanned.qty || 1;
-            setCart(prev => {
-              const existing = prev.find(c => c.id === match.id && c.finish === scanFinish);
-              if (existing) return prev.map(c => c.id === match.id && c.finish === scanFinish ? { ...c, qty: c.qty + qty } : c);
-              return [...prev, { ...match, finish: scanFinish, price, qty }];
-            });
+            const sell = getSellPrice(match, scanFinish);
+            const cost = getCost(match, scanFinish);
+            const jk   = getJKPrice(match, scanFinish);
+            itemsToAdd.push({ ...match, finish: scanFinish, price: sell, cost, jkPrice: jk, qty });
           });
-          // Clear scan state and go to quote to edit
+
+          if (itemsToAdd.length > 0) {
+            // Single batched update — merge with any existing items
+            setQuotes(prev => prev.map(q => {
+              if (q.id !== activeQuoteId) return q;
+              let items = [...q.items];
+              itemsToAdd.forEach(newItem => {
+                const idx = items.findIndex(c => c.id === newItem.id && c.finish === newItem.finish);
+                if (idx >= 0) {
+                  items[idx] = { ...items[idx], qty: items[idx].qty + newItem.qty };
+                } else {
+                  items = [...items, newItem];
+                }
+              });
+              return { ...q, items };
+            }));
+          }
+
           setScanResult(null);
           setScanStatus("idle");
           setScanImage(null);
@@ -2436,7 +2459,8 @@ Respond ONLY with valid JSON — no markdown, no backticks:
                   <div style={{ fontSize: 10, letterSpacing: 2, opacity: 0.4, marginBottom: 10 }}>DETECTED CABINETS</div>
                   <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
                     {scanResult.cabinets?.map((scanned, i) => {
-                      const match = matchCatalog(scanned);
+                      const snapped = { ...scanned, width: snapWidth(scanned.width) };
+                      const match = matchCatalog(snapped);
                       const tier = finishTier(scanFinish);
                       const est = !match ? estimatePrice(scanned) : null;
                       const excluded = scanExcluded.has(i);
@@ -2559,10 +2583,11 @@ Respond ONLY with valid JSON — no markdown, no backticks:
                   allCabs.forEach((s, i) => {
                     if (scanExcluded.has(i)) return;
                     const qty = s.qty || 1;
-                    const match = matchCatalog(s);
+                    const snapped = { ...s, width: snapWidth(s.width) };
+                    const match = matchCatalog(snapped);
                     if (match) {
-                      totalSellEst += match[tier] * 0.35 * JK_SELL_MULT * qty;
-                      totalCostEst += match[tier] * MFC_COST_MULT * qty;
+                      totalSellEst += getSellPrice(match, scanFinish) * qty;
+                      totalCostEst += (getCost(match, scanFinish) || 0) * qty;
                       totalQty += qty;
                       exactCount++;
                     } else {
