@@ -2867,27 +2867,54 @@ Respond ONLY with valid JSON — no markdown, no backticks:
                       <div style={{ fontFamily: "'Playfair Display', serif", fontSize: 22, color: isPaint ? "#7B4F9E" : "#C4956A" }}>{fmt(q.totalSell)}</div>
                     </div>
                   </div>
-                  {/* Cabinet list — collapsed summary */}
+
+                  {/* Cabinet list */}
                   <div style={{ padding: "0 16px 8px", display: "flex", flexDirection: "column", gap: 3 }}>
-                    {q.items.slice(0, 4).map((item, i) => (
-                      <div key={i} style={{ display: "flex", justifyContent: "space-between", fontSize: 11, opacity: 0.55 }}>
-                        <span>{item.id} × {item.qty}</span>
-                        <span>{fmt(item.price * item.qty)}</span>
+                    {q.items.map((item, ii) => (
+                      <div key={ii} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 11, padding: "4px 0", borderBottom: "1px solid #F5F2ED" }}>
+                        <span style={{ opacity: 0.6 }}>{item.id}{PANTRY_PAIR_MAP[item.id] && " (Box+FFD)"} × {item.qty}</span>
+                        <span style={{ fontSize: 11, opacity: 0.5, flex: 1, marginLeft: 8, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{item.description}</span>
+                        <span style={{ fontWeight: 600, flexShrink: 0, marginLeft: 8 }}>{fmt(item.price * item.qty)}</span>
                       </div>
                     ))}
-                    {q.items.length > 4 && (
-                      <div style={{ fontSize: 10, opacity: 0.35 }}>+{q.items.length - 4} more items</div>
-                    )}
+                    <div style={{ display: "flex", justifyContent: "space-between", paddingTop: 6, fontSize: 12, fontWeight: 700 }}>
+                      <span>Total</span>
+                      <span style={{ color: "#C4956A" }}>{fmt(q.totalSell)}</span>
+                    </div>
                   </div>
+
                   {/* Actions */}
-                  <div style={{ display: "flex", gap: 0, borderTop: "1px solid #F0EDE8" }}>
+                  <div style={{ display: "flex", borderTop: "1px solid #F0EDE8" }}>
                     <button onClick={() => restoreArchived(q)} style={{
-                      flex: 1, padding: "10px", border: "none", background: "transparent",
+                      flex: 1, padding: "11px 6px", border: "none", background: "transparent",
                       fontSize: 12, cursor: "pointer", color: "#4a7c59", fontWeight: 600, fontFamily: "inherit"
-                    }}>↩ Restore to Quote</button>
+                    }}>✏ Edit</button>
+                    <div style={{ width: 1, background: "#F0EDE8" }} />
+                    <button onClick={() => {
+                      // Build a printable version of this archived quote
+                      const win = window.open("", "_blank");
+                      const rows = q.items.map(item =>
+                        `<tr><td>${item.id}</td><td>${item.description}</td><td style="text-align:center">${item.qty}</td><td style="text-align:right">$${item.price.toLocaleString()}</td><td style="text-align:right">$${(item.price*item.qty).toLocaleString()}</td></tr>`
+                      ).join("");
+                      win.document.write(`<!DOCTYPE html><html><head><title>${q.name}</title>
+                        <style>body{font-family:sans-serif;padding:32px;color:#1a1a1a}h1{font-size:22px;margin:0}h2{font-size:14px;font-weight:400;opacity:0.5;margin:4px 0 24px}table{width:100%;border-collapse:collapse;font-size:13px}th{text-align:left;padding:8px 10px;background:#f5f2ed;border-bottom:2px solid #d4cbb8}td{padding:8px 10px;border-bottom:1px solid #ede9e2}.total{font-size:16px;font-weight:700;text-align:right;padding-top:12px;color:#C4956A}.meta{font-size:11px;opacity:0.4;margin-bottom:4px}</style>
+                      </head><body>
+                        <div class="meta">ALFA STUDIO · CABINET QUOTE</div>
+                        <h1>${q.name}</h1>
+                        <h2>${dateStr} · ${q.items.reduce((s,c)=>s+c.qty,0)} cabinets</h2>
+                        <table><thead><tr><th>SKU</th><th>Description</th><th style="text-align:center">Qty</th><th style="text-align:right">Unit</th><th style="text-align:right">Total</th></tr></thead>
+                        <tbody>${rows}</tbody></table>
+                        <div class="total">$${q.totalSell.toLocaleString()}</div>
+                        <script>window.print();window.close();<\/script>
+                      </body></html>`);
+                      win.document.close();
+                    }} style={{
+                      flex: 1, padding: "11px 6px", border: "none", background: "transparent",
+                      fontSize: 12, cursor: "pointer", color: "#1a1a1a", fontWeight: 600, fontFamily: "inherit"
+                    }}>⬇ PDF</button>
                     <div style={{ width: 1, background: "#F0EDE8" }} />
                     <button onClick={() => deleteArchived(q.archivedAt)} style={{
-                      padding: "10px 16px", border: "none", background: "transparent",
+                      padding: "11px 16px", border: "none", background: "transparent",
                       fontSize: 12, cursor: "pointer", color: "#c0392b", fontFamily: "inherit"
                     }}>🗑</button>
                   </div>
