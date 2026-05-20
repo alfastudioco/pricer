@@ -1031,13 +1031,19 @@ function App() {
     ));
   };
 
+  const [newQuoteNameInput, setNewQuoteNameInput] = useState("");
+  const [showNewQuotePrompt, setShowNewQuotePrompt] = useState(false);
+
   const addQuote = (itemToAdd = null) => {
     const newId = nextId;
     setNextId(n => n + 1);
-    const newQuote = { id: newId, name: `Quote ${newId}`, items: [] };
+    const name = newQuoteNameInput.trim() || `Quote ${newId}`;
+    const newQuote = { id: newId, name, items: [] };
     setQuotes(prev => [...prev, newQuote]);
     setActiveQuoteId(newId);
     setShowQuoteManager(false);
+    setShowNewQuotePrompt(false);
+    setNewQuoteNameInput("");
     if (itemToAdd) {
       const targetTier = finishTier(finish);
       setQuotes(prev => prev.map(q =>
@@ -1461,7 +1467,25 @@ function App() {
 
           {/* Header */}
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
-            <div style={{ fontFamily: "'Playfair Display', serif", fontSize: 22 }}>{activeQuote?.name}</div>
+            <div style={{ fontFamily: "'Playfair Display', serif", fontSize: 22 }}>
+              {editingName === activeQuoteId ? (
+                <input
+                  autoFocus
+                  defaultValue={activeQuote?.name}
+                  onBlur={e => {
+                    const val = e.target.value.trim();
+                    if (val) setQuotes(prev => prev.map(q => q.id === activeQuoteId ? { ...q, name: val } : q));
+                    setEditingName(null);
+                  }}
+                  onKeyDown={e => { if (e.key === "Enter") e.target.blur(); if (e.key === "Escape") setEditingName(null); }}
+                  style={{ fontFamily: "'Playfair Display', serif", fontSize: 22, border: "none", borderBottom: "2px solid #C4956A", background: "transparent", outline: "none", width: "100%", padding: "0 0 2px 0" }}
+                />
+              ) : (
+                <span onClick={() => setEditingName(activeQuoteId)} title="Tap to rename" style={{ cursor: "pointer", borderBottom: "1.5px dashed #D4CBB8" }}>
+                  {activeQuote?.name}
+                </span>
+              )}
+            </div>
             <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
               <div style={{ fontSize: 11, opacity: 0.4 }}>{cartCount} cabinet{cartCount !== 1 ? "s" : ""}</div>
               {cart.length > 0 && (<>
@@ -2934,12 +2958,36 @@ Respond ONLY with valid JSON — no markdown, no backticks:
                 );
               })}
 
-              <button onClick={addQuote} style={{
-                width: "100%", marginTop: 8, padding: "14px", background: "#F5F2ED",
-                border: "1.5px dashed #C4956A", borderRadius: 12, fontSize: 13, fontWeight: 600,
-                cursor: "pointer", color: "#C4956A", fontFamily: "inherit",
-                display: "flex", alignItems: "center", justifyContent: "center", gap: 8
-              }}>+ New Quote</button>
+              {showNewQuotePrompt ? (
+                <div style={{ marginTop: 8, background: "#F5F2ED", borderRadius: 12, padding: 14, border: "1.5px solid #C4956A" }}>
+                  <div style={{ fontSize: 12, fontWeight: 600, color: "#C4956A", marginBottom: 8 }}>New Quote Name</div>
+                  <input
+                    autoFocus
+                    value={newQuoteNameInput}
+                    onChange={e => setNewQuoteNameInput(e.target.value)}
+                    onKeyDown={e => { if (e.key === "Enter") addQuote(); if (e.key === "Escape") { setShowNewQuotePrompt(false); setNewQuoteNameInput(""); } }}
+                    placeholder="e.g. Smith Kitchen, Master Bath..."
+                    style={{ width: "100%", padding: "10px 12px", border: "1.5px solid #C4956A", borderRadius: 8, fontSize: 13, fontFamily: "inherit", background: "#fff", marginBottom: 8 }}
+                  />
+                  <div style={{ display: "flex", gap: 8 }}>
+                    <button onClick={addQuote} style={{
+                      flex: 1, padding: "10px", background: "#C4956A", color: "#fff",
+                      border: "none", borderRadius: 8, fontSize: 13, fontWeight: 600, cursor: "pointer", fontFamily: "inherit"
+                    }}>Create Quote</button>
+                    <button onClick={() => { setShowNewQuotePrompt(false); setNewQuoteNameInput(""); }} style={{
+                      padding: "10px 14px", background: "transparent", border: "1px solid #D4CBB8",
+                      borderRadius: 8, fontSize: 13, cursor: "pointer", fontFamily: "inherit", color: "#999"
+                    }}>Cancel</button>
+                  </div>
+                </div>
+              ) : (
+                <button onClick={() => setShowNewQuotePrompt(true)} style={{
+                  width: "100%", marginTop: 8, padding: "14px", background: "#F5F2ED",
+                  border: "1.5px dashed #C4956A", borderRadius: 12, fontSize: 13, fontWeight: 600,
+                  cursor: "pointer", color: "#C4956A", fontFamily: "inherit",
+                  display: "flex", alignItems: "center", justifyContent: "center", gap: 8
+                }}>+ New Quote</button>
+              )}
             </div>
           </div>
         </div>
