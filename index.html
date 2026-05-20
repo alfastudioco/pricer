@@ -1010,18 +1010,28 @@ function App() {
     setArchivedQuotes(prev => [archived, ...prev].slice(0, 50));
   }, [quotes]);
 
-  // Restore an archived quote as a new active quote
+  const [confirmDelete, setConfirmDelete] = useState(null); // { type: 'quote'|'archived', id }
+
+  // Restore archived quote — replaces it in-place in the active quotes list (no duplicate)
   const restoreArchived = useCallback((archived) => {
-    const newId = nextId;
-    setNextId(n => n + 1);
-    setQuotes(prev => [...prev, { id: newId, name: archived.name + " (restored)", items: archived.items }]);
-    setActiveQuoteId(newId);
+    // If a quote with the same name already exists, update it instead of adding new
+    const existing = quotes.find(q => q.name === archived.name || q.name === archived.name + " (restored)");
+    if (existing) {
+      setQuotes(prev => prev.map(q => q.id === existing.id ? { ...q, items: archived.items } : q));
+      setActiveQuoteId(existing.id);
+    } else {
+      const newId = nextId;
+      setNextId(n => n + 1);
+      setQuotes(prev => [...prev, { id: newId, name: archived.name, items: archived.items }]);
+      setActiveQuoteId(newId);
+    }
     setTab("quote");
-  }, [nextId]);
+  }, [quotes, nextId]);
 
   // Delete archived quote
   const deleteArchived = useCallback((archivedAt) => {
     setArchivedQuotes(prev => prev.filter(q => q.archivedAt !== archivedAt));
+    setConfirmDelete(null);
   }, []);
 
   const activeQuote = quotes.find(q => q.id === activeQuoteId) || quotes[0];
@@ -1062,6 +1072,7 @@ function App() {
     const remaining = quotes.filter(q => q.id !== id);
     setQuotes(remaining);
     if (activeQuoteId === id) setActiveQuoteId(remaining[0].id);
+    setConfirmDelete(null);
   };
 
   const duplicateQuote = (id) => {
@@ -1726,7 +1737,7 @@ function App() {
                 ))}
               </div>
 
-              <button onClick={() => setCart([])} style={{
+              <button onClick={() => setConfirmDelete({ type: "clear", id: activeQuoteId })} style={{
                 width: "100%", padding: "11px", background: "transparent",
                 border: "1px solid #D4CBB8", color: "#aaa", borderRadius: 8, fontSize: 11, letterSpacing: 2, cursor: "pointer"
               }}>CLEAR QUOTE</button>
@@ -2913,7 +2924,7 @@ Respond ONLY with valid JSON — no markdown, no backticks:
                       fontSize: 12, cursor: "pointer", color: "#1a1a1a", fontWeight: 600, fontFamily: "inherit"
                     }}>⬇ PDF</button>
                     <div style={{ width: 1, background: "#F0EDE8" }} />
-                    <button onClick={() => deleteArchived(q.archivedAt)} style={{
+                    <button onClick={() => setConfirmDelete({ type: "archived", id: q.archivedAt })} style={{
                       padding: "11px 16px", border: "none", background: "transparent",
                       fontSize: 12, cursor: "pointer", color: "#c0392b", fontFamily: "inherit"
                     }}>🗑</button>
@@ -2978,7 +2989,7 @@ Respond ONLY with valid JSON — no markdown, no backticks:
                             color: isActive ? "#F5F2ED" : "#666", fontFamily: "inherit"
                           }}>⎘</button>
                           {quotes.length > 1 && (
-                            <button onClick={() => deleteQuote(q.id)} style={{
+                            <button onClick={() => setConfirmDelete({ type: "quote", id: q.id })} style={{
                               background: "#FEF0F0", border: "none", borderRadius: 6, padding: "6px 10px", fontSize: 11, cursor: "pointer", color: "#c0392b"
                             }}>🗑</button>
                           )}
@@ -3153,6 +3164,40 @@ Respond ONLY with valid JSON — no markdown, no backticks:
           </div>
         );
       })()}
+
+      {/* ── CONFIRM DELETE DIALOG ── */}
+      {confirmDelete && (
+        <div className="sheet-overlay" onClick={() => setConfirmDelete(null)}>
+          <div className="sheet" onClick={e => e.stopPropagation()} style={{ paddingBottom: 24 }}>
+            <div className="sheet-handle" />
+            <div style={{ padding: "8px 20px 20px" }}>
+              <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 8 }}>
+                {confirmDelete.type === "clear" ? "Clear Quote?" :
+                 confirmDelete.type === "quote" ? "Delete Quote?" : "Delete from History?"}
+              </div>
+              <div style={{ fontSize: 13, opacity: 0.5, marginBottom: 20 }}>
+                {confirmDelete.type === "clear" ? "All items will be removed from this quote." :
+                 confirmDelete.type === "quote" ? "This quote will be permanently deleted." :
+                 "This entry will be removed from history."}
+              </div>
+              <div style={{ display: "flex", gap: 8 }}>
+                <button onClick={() => {
+                  if (confirmDelete.type === "clear")    { setCart([]); setConfirmDelete(null); }
+                  if (confirmDelete.type === "quote")    deleteQuote(confirmDelete.id);
+                  if (confirmDelete.type === "archived") deleteArchived(confirmDelete.id);
+                }} style={{
+                  flex: 1, padding: "12px", background: "#c0392b", color: "#fff",
+                  border: "none", borderRadius: 8, fontSize: 13, fontWeight: 600, cursor: "pointer", fontFamily: "inherit"
+                }}>Delete</button>
+                <button onClick={() => setConfirmDelete(null)} style={{
+                  flex: 1, padding: "12px", background: "#F5F2ED",
+                  border: "1px solid #D4CBB8", borderRadius: 8, fontSize: 13, cursor: "pointer", fontFamily: "inherit"
+                }}>Cancel</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Finish Picker Sheet */}
       {(showFinishPicker || finishPickerFor !== null) && (() => {
