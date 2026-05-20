@@ -426,26 +426,26 @@ const MFC_BOX = {
 };
 
 // ── PANTRY PAIRS ─────────────────────────────────────────────────────────────
-// Modernform pantry/oven cabinets require a BOX + FFD (face frame & door) SKU.
-// These virtual combined SKUs represent the complete cabinet for pricing.
-// tier1/tier2 = BOX + FFD combined retail price
+// Modernform pantry/oven cabinets = BOX + FFD (face frame & door) combined.
+// tier1/tier2 = BOX + FFD combined MFC retail (your cost basis = × 0.25)
+// jkNdpId = matching J&K SKU for sell price via getNDP()
 const PANTRY_PAIRS = [
-  // 18" Pantry
-  { id:"PC1884", description:"18x84x24 Pantry Cabinet (Complete)", boxId:"PC188424BOX", ffdId:"PC188424FFD", tier1:946+494, tier2:1041+543, category:"Pantry & Oven Cabinets" },
-  { id:"PC1890", description:"18x90x24 Pantry Cabinet (Complete)", boxId:"PC189024BOX", ffdId:"PC189024FFD", tier1:969+519, tier2:1065+571, category:"Pantry & Oven Cabinets" },
-  { id:"PC1896", description:"18x96x24 Pantry Cabinet (Complete)", boxId:"PC189624BOX", ffdId:"PC189624FFD", tier1:1016+545, tier2:1118+600, category:"Pantry & Oven Cabinets" },
-  // 24" Pantry
-  { id:"PC2484", description:"24x84x24 Pantry Cabinet (Complete)", boxId:"PC248424BOX", ffdId:"PC248424FFD", tier1:1042+541, tier2:1146+595, category:"Pantry & Oven Cabinets" },
-  { id:"PC2490", description:"24x90x24 Pantry Cabinet (Complete)", boxId:"PC249024BOX", ffdId:"PC249024FFD", tier1:1100+610, tier2:1210+671, category:"Pantry & Oven Cabinets" },
-  { id:"PC2496", description:"24x96x24 Pantry Cabinet (Complete)", boxId:"PC249624BOX", ffdId:"PC249624FFD", tier1:1154+667, tier2:1270+733, category:"Pantry & Oven Cabinets" },
-  // 30" Pantry
-  { id:"PC3084", description:"30x84x24 Pantry Cabinet (Complete)", boxId:"PC308424BOX", ffdId:"PC308424FFD", tier1:1190+685, tier2:1309+754, category:"Pantry & Oven Cabinets" },
-  { id:"PC3090", description:"30x90x24 Pantry Cabinet (Complete)", boxId:"PC309024BOX", ffdId:"PC309024FFD", tier1:1246+756, tier2:1371+832, category:"Pantry & Oven Cabinets" },
-  { id:"PC3096", description:"30x96x24 Pantry Cabinet (Complete)", boxId:"PC309624BOX", ffdId:"PC309624FFD", tier1:1297+809, tier2:1427+890, category:"Pantry & Oven Cabinets" },
-  // 33" Oven
-  { id:"OC3384", description:"33x84x24 Oven Cabinet (Complete)", boxId:"OC338424BOX", ffdId:"OC338424FFD", tier1:1662+582, tier2:1828+640, category:"Pantry & Oven Cabinets" },
-  { id:"OC3390", description:"33x90x24 Oven Cabinet (Complete)", boxId:"OC339024BOX", ffdId:"OC339024FFD", tier1:1726+626, tier2:1899+688, category:"Pantry & Oven Cabinets" },
-  { id:"OC3396", description:"33x96x24 Oven Cabinet (Complete)", boxId:"OC339624BOX", ffdId:"OC339624FFD", tier1:1850+712, tier2:2035+783, category:"Pantry & Oven Cabinets" },
+  // 18" Pantry  (JK = WP18xx27)
+  { id:"PC1884", description:'18" Pantry Cabinet 84"H (Box+FFD)', jkNdpId:"WP188427", tier1:946+494,  tier2:1041+543, category:"Pantry & Oven Cabinets" },
+  { id:"PC1890", description:'18" Pantry Cabinet 90"H (Box+FFD)', jkNdpId:"WP189027", tier1:969+519,  tier2:1065+571, category:"Pantry & Oven Cabinets" },
+  { id:"PC1896", description:'18" Pantry Cabinet 96"H (Box+FFD)', jkNdpId:"WP189627", tier1:1016+545, tier2:1118+600, category:"Pantry & Oven Cabinets" },
+  // 24" Pantry  (JK = WP24xx27)
+  { id:"PC2484", description:'24" Pantry Cabinet 84"H (Box+FFD)', jkNdpId:"WP248427", tier1:1042+541, tier2:1146+595, category:"Pantry & Oven Cabinets" },
+  { id:"PC2490", description:'24" Pantry Cabinet 90"H (Box+FFD)', jkNdpId:"WP249027", tier1:1100+610, tier2:1210+671, category:"Pantry & Oven Cabinets" },
+  { id:"PC2496", description:'24" Pantry Cabinet 96"H (Box+FFD)', jkNdpId:"WP249627", tier1:1154+667, tier2:1270+733, category:"Pantry & Oven Cabinets" },
+  // 30" Pantry  (JK = WP30xx27)
+  { id:"PC3084", description:'30" Pantry Cabinet 84"H (Box+FFD)', jkNdpId:"WP308427", tier1:1190+685, tier2:1309+754, category:"Pantry & Oven Cabinets" },
+  { id:"PC3090", description:'30" Pantry Cabinet 90"H (Box+FFD)', jkNdpId:"WP309027", tier1:1246+756, tier2:1371+832, category:"Pantry & Oven Cabinets" },
+  { id:"PC3096", description:'30" Pantry Cabinet 96"H (Box+FFD)', jkNdpId:"WP309627", tier1:1297+809, tier2:1427+890, category:"Pantry & Oven Cabinets" },
+  // 33" Oven  (JK = OC33xx27)
+  { id:"OC3384", description:'33" Oven Cabinet 84"H (Box+FFD)',   jkNdpId:"OC338427",  tier1:1662+582, tier2:1828+640, category:"Pantry & Oven Cabinets" },
+  { id:"OC3390", description:'33" Oven Cabinet 90"H (Box+FFD)',   jkNdpId:"OC339027",  tier1:1726+626, tier2:1899+688, category:"Pantry & Oven Cabinets" },
+  { id:"OC3396", description:'33" Oven Cabinet 96"H (Box+FFD)',   jkNdpId:"OC339627",  tier1:1850+712, tier2:2035+783, category:"Pantry & Oven Cabinets" },
 ];
 
 // Lookup: id → pair entry
@@ -838,10 +838,14 @@ const finishTier = (finish) => {
 const MFC_COST_MULT = 0.25;  // your cost = 75% off Modernform retail
 const JK_SELL_MULT  = 0.92;  // your sell = 8% below JK NDP
 
-// Get the real NDP (your cost) for a catalog item and finish — applies correct tier multiplier
+// Get the real NDP for a catalog item — applies correct tier multiplier
+// For pantry pairs, uses the matching JK SKU via jkNdpId
 const getNDP = (item, finish) => {
   if (!item) return null;
-  const baseNdp = JK_NDP[item.id] || JK_NDP[item.id?.replace(/^(3|2)DB/, "DB$1-").replace(/^DB(\d+)-(\d)$/, "$2DB$1")];
+  // Pantry pair — look up JK NDP by the paired JK SKU id
+  const pair = PANTRY_PAIR_MAP[item.id];
+  const lookupId = pair ? pair.jkNdpId : item.id;
+  const baseNdp = JK_NDP[lookupId];
   if (!baseNdp) return item.tier1 ? Math.round(item.tier1 * 0.25 * 100) / 100 : null;
   const tier = (finish && FINISH_NDP_TIER[finish]) || "t2";
   return Math.round(baseNdp * NDP_TIER_MULT[tier] * 100) / 100;
