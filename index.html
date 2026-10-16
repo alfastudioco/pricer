@@ -894,11 +894,289 @@ const recommendDiscount = (items) => {
 const quoteDiscount = (q) => q.discount != null ? q.discount : recommendDiscount(q.items);
 const pricedItems   = (q) => { const d = quoteDiscount(q); return q.items.map(l => ({ ...l, price: linePrice(l, d) })); };
 
+// ── MODERNFORM SALES ORDER IMPORT ────────────────────────────────────────────
+// Modernform item codes look like "GRS-B18 T_HCI": finish code, dash, catalog SKU,
+// then a door/assembly suffix (often truncated "T..." on the PDF).
+const VENDOR_FINISH_CODES = { GRS: "Gray" };
+
+const splitVendorSku = (raw) => {
+  const s = (raw || "").trim();
+  const m = s.match(/^([A-Z]{2,4})-(\S+)/);
+  if (!m) return { code: null, sku: s };
+  return { code: m[1], sku: m[2].split("_")[0].replace(/\.+$/, "") };
+};
+
+// Exact SKU match first; fall back to the description when the SKU was truncated
+const matchVendorLine = (line) => {
+  const key = splitVendorSku(line.item).sku.toUpperCase();
+  const desc = (line.description || "").trim().toLowerCase();
+  return cabinets.find(c => c.id.toUpperCase() === key)
+    || (desc && cabinets.find(c => c.description.toLowerCase() === desc))
+    || null;
+};
+
+// Finish from the most common finish code on the order; null if we don't know the code
+const vendorFinishFor = (lines) => {
+  const counts = {};
+  lines.forEach(l => { const { code } = splitVendorSku(l.item); if (code) counts[code] = (counts[code] || 0) + 1; });
+  const top = Object.keys(counts).sort((a, b) => counts[b] - counts[a])[0];
+  return (top && VENDOR_FINISH_CODES[top]) || null;
+};
+
+// Quote lines: the vendor's unit price is your cost. Lines not in the catalog get
+// retail backed out of that cost so the quote discount applies to them too.
+const buildVendorItems = (lines, finish) => lines.map(l => {
+  const qty = l.qty || 1;
+  const vendorCost = Math.round(l.unit_price * 100) / 100;
+  const match = matchVendorLine(l);
+  if (match) return { ...match, finish, qty, vendorCost, vendorSku: l.item };
+  const { sku } = splitVendorSku(l.item);
+  return {
+    id: sku, description: l.description || sku, category: "Vendor item", finish, qty,
+    vendorCost, retail: Math.round(vendorCost / MFC_COST_MULT * 100) / 100,
+    vendorSku: l.item, isVendorOnly: true,
+  };
+});
+
+const VENDOR_ORDER_SCHEMA = {
+  type: "object",
+  properties: {
+    so_number: { type: "string" },
+    lines: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          item: { type: "string" },
+          description: { type: "string" },
+          qty: { type: "number" },
+          unit_price: { type: "number" },
+        },
+        required: ["item", "description", "qty", "unit_price"],
+        additionalProperties: false,
+      },
+    },
+    assembly_qty: { type: "number" },
+    assembly_unit_price: { type: "number" },
+    delivery: { type: "number" },
+    subtotal: { type: "number" },
+  },
+  required: ["so_number", "lines", "assembly_qty", "assembly_unit_price", "delivery", "subtotal"],
+  additionalProperties: false,
+};
+
+const VENDOR_ORDER_PROMPT = `This is a sales order or estimate from Modernform Cabinets. Read its line-item table.
+
+- lines: every product row, in the order printed. item is the Item column copied exactly as printed, including any finish prefix and any truncation such as "T...". description is the Description column. qty is the Quantity column; a blank quantity means 1. unit_price is the Unit Price column.
+- Leave these rows out of lines: Subtotal, sales tax, Assembly Charge, Local Delivery, and any AvaTax row.
+- assembly_qty and assembly_unit_price: from the Assembly Charge row (0 and 0 if there is none).
+- delivery: the delivery charge amount (0 if there is none).
+- subtotal: the product subtotal printed on the order, before tax, assembly and delivery (0 if not printed).
+- so_number: the S.O. or estimate number.`;
+
+const buildVendorRequest = (file) => ({
+  headers: { "Content-Type": "application/json", "anthropic-beta": "server-side-fallback-2026-07-01" },
+  body: {
+    model: "claude-opus-5-5",
+    max_tokens: 16000,
+    fallbacks: "default",
+    output_config: { effort: "low", format: { type: "json_schema", schema: VENDOR_ORDER_SCHEMA } },
+    messages: [{ role: "user", content: [
+      file.isPdf
+        ? { type: "document", source: { type: "base64", media_type: "application/pdf", data: file.b64 } }
+        : { type: "image", source: { type: "base64", media_type: file.mediaType || "image/jpeg", data: file.b64 } },
+      { type: "text", text: VENDOR_ORDER_PROMPT },
+    ] }],
+  },
+});
+
+const parseVendorResponse = (data) => {
+  if (data.error) throw new Error(data.error.message || String(data.error));
+  if (data.stop_reason === "refusal") throw new Error("The model declined to read this file.");
+  if (data.stop_reason === "max_tokens") throw new Error("The response was cut off — try a shorter order or split it into pages.");
+  const text = data.content?.find(b => b.type === "text")?.text;
+  if (!text) throw new Error("Empty response from the API.");
+  const order = JSON.parse(text);
+  if (!Array.isArray(order.lines) || !order.lines.length) throw new Error("No line items found on this file.");
+  return order;
+};
+
+const readVendorOrder = async (file) => {
+  const { headers, body } = buildVendorRequest(file);
+  const resp = await fetch("/api/claude", { method: "POST", headers, body: JSON.stringify(body) });
+  return parseVendorResponse(await resp.json());
+};
+
 const getPrice = getMFCRetail;
 
 
 const fmt = (n) => "$" + Math.round(n).toLocaleString("en-US", { minimumFractionDigits: 0 });
 
+
+const fmt2 = (n) => "$" + n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+// Upload a Modernform sales order, review how its lines map to the catalog, then make a quote
+function VendorOrderImport({ onCreate }) {
+  const [file, setFile] = useState(null);
+  const [status, setStatus] = useState("idle"); // idle | reading | done | error
+  const [error, setError] = useState(null);
+  const [order, setOrder] = useState(null);
+  const [finish, setFinish] = useState(null);
+  const [excluded, setExcluded] = useState(new Set());
+
+  const onFile = (e) => {
+    const f = e.target.files?.[0];
+    if (!f) return;
+    setOrder(null); setStatus("idle"); setError(null);
+    const isPdf = f.type === "application/pdf" || f.name.toLowerCase().endsWith(".pdf");
+    const reader = new FileReader();
+    reader.onload = (ev) => setFile({ b64: ev.target.result.split(",")[1], isPdf, name: f.name, mediaType: isPdf ? "application/pdf" : f.type || "image/jpeg" });
+    reader.readAsDataURL(f);
+  };
+
+  const read = async () => {
+    setStatus("reading"); setError(null);
+    try {
+      const o = await readVendorOrder(file);
+      setOrder(o);
+      setFinish(vendorFinishFor(o.lines));
+      setExcluded(new Set());
+      setStatus("done");
+    } catch (err) {
+      console.warn("Vendor order read failed:", err);
+      setError(err.message || "Unknown error");
+      setStatus("error");
+    }
+  };
+
+  const toggle = (i) => setExcluded(prev => { const n = new Set(prev); n.has(i) ? n.delete(i) : n.add(i); return n; });
+
+  const lines = order?.lines || [];
+  const items = finish ? buildVendorItems(lines, finish) : [];
+  const kept = items.filter((_, i) => !excluded.has(i));
+  const matchedCount = lines.filter(l => matchVendorLine(l)).length;
+  const lineTotal = lines.reduce((s, l) => s + (l.qty || 1) * l.unit_price, 0);
+  const addsUp = order && order.subtotal > 0 && Math.abs(lineTotal - order.subtotal) < 0.05;
+  const unknownCode = order && !finish ? splitVendorSku(lines.find(l => splitVendorSku(l.item).code)?.item).code : null;
+
+  const create = () => {
+    onCreate({
+      name: `MF SO ${order.so_number}`,
+      items: kept,
+      vendorOrder: {
+        so: order.so_number, subtotal: order.subtotal, delivery: order.delivery,
+        assemblyQty: order.assembly_qty, assemblyRate: order.assembly_unit_price,
+      },
+    });
+  };
+
+  return (
+    <div>
+      <div style={{ fontFamily: "'Playfair Display', serif", fontSize: 22, marginBottom: 4 }}>Modernform Order</div>
+      <div style={{ fontSize: 11, opacity: 0.45, marginBottom: 18 }}>Upload a Modernform sales order or estimate. Its lines are matched to the catalog and become a quote, with the vendor's prices as your cost.</div>
+
+      <label style={{
+        display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
+        border: `2px dashed ${file ? "#4a7c59" : "#D4CBB8"}`, borderRadius: 14, padding: "24px 16px",
+        cursor: "pointer", background: file ? "#F0F7F2" : "#fff", marginBottom: 14
+      }}>
+        <input data-vendor-file type="file" accept=".pdf,application/pdf,image/*" onChange={onFile} style={{ display: "none" }} />
+        <div style={{ fontSize: 40, marginBottom: 8 }}>🧾</div>
+        {file
+          ? <div style={{ fontSize: 13, fontWeight: 500, color: "#4a7c59" }}>✓ {file.name} <span style={{ opacity: 0.5, fontWeight: 400 }}>— tap to change</span></div>
+          : <div style={{ fontSize: 14, fontWeight: 500 }}>Upload Sales Order</div>}
+      </label>
+
+      {file && status !== "reading" && status !== "done" && (
+        <button onClick={read} style={{
+          width: "100%", padding: "14px", background: "#1a1a1a", color: "#F5F2ED", border: "none",
+          borderRadius: 12, fontSize: 14, fontWeight: 600, cursor: "pointer", marginBottom: 16, fontFamily: "inherit"
+        }}>{status === "error" ? "↺ Try again" : "Read order"}</button>
+      )}
+
+      {status === "reading" && (
+        <div style={{ background: "#fff", borderRadius: 12, border: "1px solid #E5DFD6", padding: "24px", textAlign: "center", marginBottom: 16 }}>
+          <div style={{ fontSize: 14, fontWeight: 500 }}>Reading order…</div>
+          <div style={{ fontSize: 11, opacity: 0.4, marginTop: 6 }}>Pulling SKUs, quantities and prices</div>
+        </div>
+      )}
+
+      {status === "error" && (
+        <div style={{ background: "#FEF0F0", borderRadius: 12, border: "1px solid #F0C0C0", padding: "14px 16px", marginBottom: 16, fontSize: 12, color: "#c0392b" }}>
+          ⚠ {error}
+        </div>
+      )}
+
+      {status === "done" && order && (<>
+        <div style={{ background: "#1a1a1a", color: "#F5F2ED", borderRadius: 14, padding: "16px 18px", marginBottom: 12 }}>
+          <div style={{ fontSize: 10, letterSpacing: 2, opacity: 0.4, marginBottom: 8 }}>MODERNFORM SO {order.so_number}</div>
+          <div style={{ fontSize: 13, marginBottom: 6 }}>{matchedCount} matched · {lines.length - matchedCount} not in catalog</div>
+          <div style={{ fontSize: 12, opacity: 0.8 }}>Vendor subtotal {fmt2(order.subtotal || lineTotal)}</div>
+          {order.subtotal > 0 && (
+            <div style={{ fontSize: 11, marginTop: 6, color: addsUp ? "#8fd1a3" : "#ff8a7a" }}>
+              {addsUp ? "✓ Lines add up to the order subtotal" : `⚠ Lines total ${fmt2(lineTotal)}, order says ${fmt2(order.subtotal)} — check for a misread line`}
+            </div>
+          )}
+        </div>
+
+        <div style={{ marginBottom: 12 }}>
+          <div style={{ fontSize: 10, letterSpacing: 2, opacity: 0.4, marginBottom: 8 }}>
+            FINISH{unknownCode ? ` — unknown code "${unknownCode}", pick one` : ""}
+          </div>
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+            {[...TIER_ONE_FINISHES, ...TIER_TWO_FINISHES, ...TIER_BOX_FINISHES].map(f => (
+              <button key={f} onClick={() => setFinish(f)} style={{
+                padding: "6px 12px", border: `1.5px solid ${finish === f ? "#1a1a1a" : "#D4CBB8"}`,
+                background: finish === f ? "#1a1a1a" : "transparent", color: finish === f ? "#F5F2ED" : "#666",
+                borderRadius: 16, fontSize: 11, cursor: "pointer", fontFamily: "inherit"
+              }}>{f}</button>
+            ))}
+          </div>
+        </div>
+
+        {finish && (<>
+          <div style={{ display: "flex", flexDirection: "column", gap: 6, marginBottom: 12 }}>
+            {items.map((it, i) => {
+              const off = excluded.has(i);
+              const src = !it.isVendorOnly && catalogItem(it);
+              const expected = src ? getCost(src, finish) : null;
+              const priceDiffers = expected != null && Math.abs(expected - it.vendorCost) > Math.max(0.5, expected * 0.01);
+              const jk = lineJK(it);
+              return (
+                <div key={i} style={{ background: off ? "#F5F5F5" : "#fff", opacity: off ? 0.5 : 1, borderRadius: 10, border: `1px solid ${it.isVendorOnly ? "#F0C89A" : "#C8E6D0"}`, padding: "10px 12px" }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
+                    <div style={{ minWidth: 0 }}>
+                      <div style={{ fontSize: 10, color: "#8B7355" }}>
+                        {it.vendorSku} {it.isVendorOnly ? <span style={{ color: "#C4956A" }}>· not in catalog</span> : <span style={{ color: "#4a7c59" }}>→ {it.id}</span>}
+                      </div>
+                      <div style={{ fontSize: 12 }}>{it.description}</div>
+                    </div>
+                    <button onClick={() => toggle(i)} style={{ flexShrink: 0, alignSelf: "flex-start", border: "1px solid #E0D0C0", background: "#FEF3EB", color: "#8B5E3C", borderRadius: 6, padding: "3px 9px", fontSize: 10, cursor: "pointer", fontFamily: "inherit" }}>
+                      {off ? "↩ Restore" : "✕ Remove"}
+                    </button>
+                  </div>
+                  <div style={{ display: "flex", gap: 10, marginTop: 6, fontSize: 11, flexWrap: "wrap" }}>
+                    <span>{it.qty} × <strong style={{ color: "#2d6b45" }}>{fmt2(it.vendorCost)}</strong> cost</span>
+                    <span style={{ opacity: 0.6 }}>retail {fmt(lineRetail(it))}{it.isVendorOnly ? " (from cost)" : ""}</span>
+                    {jk && <span style={{ color: "#8B5E3C" }}>J&K {fmt(jk)}</span>}
+                  </div>
+                  {priceDiffers && (
+                    <div style={{ fontSize: 10, color: "#c0392b", marginTop: 4 }}>⚠ Catalog cost for {finish} is {fmt2(expected)} — check the finish or catalog price</div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+
+          <button onClick={create} disabled={!kept.length} style={{
+            width: "100%", padding: "14px", background: "#4a7c59", color: "#fff", border: "none",
+            borderRadius: 12, fontSize: 14, fontWeight: 600, cursor: "pointer", fontFamily: "inherit", marginBottom: 8
+          }}>✓ Create quote MF SO {order.so_number}</button>
+        </>)}
+      </>)}
+    </div>
+  );
+}
 
 function App() {
   const [search, setSearch] = useState("");
@@ -921,6 +1199,7 @@ function App() {
   const [scanError, setScanError] = useState(null);
   const [scanFinish, setScanFinish] = useState("White");
   const [scanExcluded, setScanExcluded] = useState(new Set()); // indices of removed items
+  const [scanMode, setScanMode] = useState("layout"); // layout | vendor
 
   // ── MULTI-QUOTE STATE ──────────────────────────────────────────
   const [quotes, setQuotes] = useState([{ id: 1, name: "Quote 1", items: [] }]);
@@ -1071,6 +1350,14 @@ function App() {
     }
   };
 
+  const createVendorQuote = ({ name, items, vendorOrder }) => {
+    const newId = nextId;
+    setNextId(n => n + 1);
+    setQuotes(prev => [...prev, { id: newId, name, items, vendorOrder }]);
+    setActiveQuoteId(newId);
+    setTab("quote");
+  };
+
   const deleteQuote = (id) => {
     if (quotes.length === 1) return;
     const remaining = quotes.filter(q => q.id !== id);
@@ -1158,9 +1445,14 @@ function App() {
   const jkLinesSell = cart.reduce((sum, c) => sum + (lineJK(c) ? c.price * c.qty : 0), 0);
   const jkMissing   = cart.filter(c => !lineJK(c)).length;
 
-  const assemblyFee = cartCount * ASSEMBLY_FEE;
-  const shippingFee = SHIPPING_FEE;
-  const totalCost   = cartCost  + assemblyFee + shippingFee;
+  // A quote built from a Modernform order uses its box count for assembly and its delivery as your shipping cost
+  const vendorOrder   = activeQuote?.vendorOrder;
+  const assemblyCount = vendorOrder ? vendorOrder.assemblyQty : cartCount;
+  const assemblyFee   = assemblyCount * ASSEMBLY_FEE;
+  const assemblyCost  = vendorOrder ? vendorOrder.assemblyQty * vendorOrder.assemblyRate : assemblyFee;
+  const shippingFee   = SHIPPING_FEE;
+  const shippingCost  = vendorOrder ? vendorOrder.delivery : SHIPPING_FEE;
+  const totalCost   = cartCost  + assemblyCost + shippingCost;
   const totalSell   = cartSell  + assemblyFee + shippingFee;
   const totalProfit = totalSell - totalCost;
   const marginPct   = totalSell > 0 ? Math.round(totalProfit / totalSell * 100) : 0;
@@ -1391,7 +1683,7 @@ function App() {
                 </div>
                 {/* Linear foot pricing */}
                 {(() => {
-                  const wMatch = item.description.match(/^(d+)["x]/);
+                  const wMatch = item.description.match(/^(\d+)["x]/);
                   const widthIn = wMatch ? parseInt(wMatch[1]) : null;
                   if (!widthIn) return null;
                   const widthFt = widthIn / 12;
@@ -1504,7 +1796,7 @@ function App() {
                       ["Retail value", fmt(cartRetail)],
                       [`Your discount (${Math.round(discount * 100)}% off retail)`, "− " + fmt(customerSavings)],
                       ["Cabinets", fmt(cartSell)],
-                      [`Assembly (${cartCount} × $${ASSEMBLY_FEE})`, fmt(assemblyFee)],
+                      [`Assembly (${assemblyCount} × $${ASSEMBLY_FEE})`, fmt(assemblyFee)],
                       ["Shipping", fmt(shippingFee)],
                     ].map(([l, v]) => (
                       <div key={l} style={{ display: "flex", justifyContent: "space-between", fontSize: 11, marginBottom: 5, paddingBottom: 5, borderBottom: "1px solid #EDE9E2" }}>
@@ -1658,7 +1950,7 @@ function App() {
                     <div style={{ flex: 1, background: "#EBF5EF", borderRadius: 10, padding: "12px 14px", border: "1.5px solid #A8D5B5" }}>
                       <div style={{ fontSize: 9, letterSpacing: 1.5, color: "#2d6b45", fontWeight: 700, marginBottom: 4 }}>YOUR COST</div>
                       <div style={{ fontSize: 22, fontWeight: 800, color: "#2d6b45", lineHeight: 1 }}>{fmt(totalCost)}</div>
-                      <div style={{ fontSize: 9, color: "#2d6b45", opacity: 0.6, marginTop: 3 }}>incl. assembly + shipping</div>
+                      <div style={{ fontSize: 9, color: "#2d6b45", opacity: 0.6, marginTop: 3 }}>{vendorOrder ? `MF SO ${vendorOrder.so} · incl. assembly + delivery` : "incl. assembly + shipping"}</div>
                     </div>
                     <div style={{ flex: 1, background: "#1a1a1a", borderRadius: 10, padding: "12px 14px" }}>
                       <div style={{ fontSize: 9, letterSpacing: 1.5, color: "#C4956A", fontWeight: 700, marginBottom: 4 }}>YOUR SELL</div>
@@ -1670,7 +1962,7 @@ function App() {
                   {[
                     ["MF retail", fmt(cartRetail)],
                     [`Cabinets at ${Math.round(discount * 100)}% off`, fmt(cartSell)],
-                    [`Assembly (${cartCount} × $${ASSEMBLY_FEE})`, fmt(assemblyFee)],
+                    [`Assembly (${assemblyCount} × $${ASSEMBLY_FEE})`, fmt(assemblyFee)],
                     ["Shipping", fmt(shippingFee)],
                   ].map(([l, v]) => (
                     <div key={l} style={{ display: "flex", justifyContent: "space-between", marginBottom: 6, fontSize: 12 }}>
@@ -2457,11 +2749,30 @@ Respond ONLY with valid JSON — no markdown, no backticks:
           setTab("quote");
         };
 
+        const modeToggle = (
+          <div style={{ display: "flex", gap: 6, marginBottom: 16 }}>
+            {[["layout", "Layout drawing"], ["vendor", "Vendor order"]].map(([m, label]) => (
+              <button key={m} onClick={() => setScanMode(m)} style={{
+                flex: 1, padding: "9px", border: `1.5px solid ${scanMode === m ? "#1a1a1a" : "#D4CBB8"}`,
+                background: scanMode === m ? "#1a1a1a" : "transparent", color: scanMode === m ? "#F5F2ED" : "#666",
+                borderRadius: 10, fontSize: 12, cursor: "pointer", fontFamily: "inherit", fontWeight: 600
+              }}>{label}</button>
+            ))}
+          </div>
+        );
+        if (scanMode === "vendor") return (
+          <div style={{ padding: "16px 14px 32px" }}>
+            {modeToggle}
+            <VendorOrderImport onCreate={createVendorQuote} />
+          </div>
+        );
+
         const confidenceColor = { high: "#4a7c59", medium: "#C4956A", low: "#c0392b" };
         const typeIcon = { base: "🟫", wall: "🔲", pantry: "📦", tall: "📦", drawer_base: "🗄", sink_base: "🚰", blind_corner: "↩️", lazy_susan: "🔄", diagonal_corner: "◣", microwave: "📡", vanity: "🪞", accessory: "⚙️" };
 
         return (
           <div style={{ padding: "16px 14px 32px" }}>
+            {modeToggle}
             <div style={{ fontFamily: "'Playfair Display', serif", fontSize: 22, marginBottom: 4 }}>Layout Scanner</div>
             <div style={{ fontSize: 11, opacity: 0.45, marginBottom: 18 }}>Upload a floor plan, elevation drawing, or cabinet layout — AI will detect cabinet sizes and types.</div>
 
