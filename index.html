@@ -1246,12 +1246,14 @@ function App() {
   // Set once quotes loaded from the server ({ password } — null password when none is needed).
   // Saves go to the server only then, so a local-only copy never overwrites shared quotes.
   const [serverSync, setServerSync] = useState(null);
+  const [needsPassword, setNeedsPassword] = useState(false); // server refused the password
 
   // Load from the server on mount, fall back to localStorage without the password
   useEffect(() => {
     const load = async () => {
       try {
         const { resp: r, password } = await fetchWithPassword("/api/quotes");
+        setNeedsPassword(r.status === 401);
         if (r.ok) {
           const data = await r.json();
           setServerSync({ password });
@@ -1298,7 +1300,7 @@ function App() {
           headers: { "Content-Type": "application/json", ...(serverSync.password ? { "x-password": serverSync.password } : {}) },
           body: JSON.stringify(payload),
         });
-        if (r.status === 401) { forgetAppPassword(); setServerSync(null); }
+        if (r.status === 401) { forgetAppPassword(); setServerSync(null); setNeedsPassword(true); }
         setSaveStatus(r.ok ? "saved" : "error");
       } catch {
         setSaveStatus("error"); // server unreachable — localStorage backup still worked
@@ -1573,12 +1575,14 @@ function App() {
               {saveStatus === "saving" && <div style={{ fontSize: 8, color: "#C4956A", opacity: 0.7 }}>● saving…</div>}
               {saveStatus === "saved"  && <div style={{ fontSize: 8, color: "#4a7c59", opacity: 0.8 }}>✓ saved</div>}
               {saveStatus === "error"  && <div style={{ fontSize: 8, color: "#aaa",    opacity: 0.6 }}>⚠ save failed</div>}
-              {storageReady && !serverSync && (
+              {storageReady && !serverSync && (needsPassword ? (
                 <button onClick={() => { forgetAppPassword(); window.location.reload(); }} title="Quotes aren't syncing — tap to enter the password"
                   style={{ fontSize: 8, color: "#C4956A", background: "none", border: "none", padding: 0, cursor: "pointer", fontFamily: "inherit" }}>
                   ⚠ local only · sign in
                 </button>
-              )}
+              ) : (
+                <div title="Quotes are saved in this browser only — the server isn't set up for quote storage" style={{ fontSize: 8, color: "#aaa", opacity: 0.6 }}>⚠ local only</div>
+              ))}
             </div>
           </div>
           <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
