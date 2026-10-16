@@ -369,16 +369,12 @@ function CabinetIcon({ id, description, finish="White" }) {
 
 const TIER_ONE_FINISHES = ["Gray", "White", "Modern Slate", "Espresso"];
 const TIER_TWO_FINISHES = ["Signature Blue", "Natural", "Onyx Black", "Slim Dove White", "Slim Sage Green"];
-const TIER_PAINT_FINISHES = ["Custom Paint Grade"];
 const TIER_BOX_FINISHES = ["Box Only", "Box + Deluxe"];
-
-// Paint grade = ~2.0x Tier 1 retail (derived from Lizanna/Sherlock projects)
-const PAINT_MULTIPLIER = 2.0;
 
 // ── MODERNFORM BOX PRICING ───────────────────────────────────────────────────
 // Format: [BOX, CLASSIC, DELUXE]  — MSRP prices from Modernform catalog
-// Your cost = any of these × 0.25 (75% off)
-// Your sell = (BOX or BOX+DELUXE) × 0.25 × markup (you set the sell price)
+// Your cost = any of these × 0.22 (78% off)
+// Your sell = (BOX or BOX+DELUXE) × (1 − quote discount)
 const MFC_BOX = {
   B12:[633,71,128],B15:[671,83,156],B18:[708,95,182],B21:[747,105,209],
   B24:[980,127,255],B27:[852,140,273],B30:[890,152,299],B33:[925,164,326],B36:[963,176,353],
@@ -427,7 +423,7 @@ const MFC_BOX = {
 
 // ── PANTRY PAIRS ─────────────────────────────────────────────────────────────
 // Modernform pantry/oven cabinets = BOX + FFD (face frame & door) combined.
-// tier1/tier2 = BOX + FFD combined MFC retail (your cost basis = × 0.25)
+// tier1/tier2 = BOX + FFD combined MFC retail (your cost basis = × 0.22)
 // jkNdpId = matching J&K SKU for sell price via getNDP()
 const PANTRY_PAIRS = [
   // 18" Pantry  (JK = WP18xx27)
@@ -828,72 +824,75 @@ const cabinets = [
 const CATEGORIES = ["All", "Base Cabinets", "Pantry & Oven Cabinets", "Vanity Cabinets", "Wall Cabinets", "Accessories"];
 const CAT_SHORT = { "All": "All", "Base Cabinets": "Base", "Pantry & Oven Cabinets": "Pantry", "Vanity Cabinets": "Vanity", "Wall Cabinets": "Wall", "Accessories": "Accessories" };
 
-const finishTier = (finish) => {
-  if (TIER_ONE_FINISHES.includes(finish)) return "tier1";
-  if (TIER_PAINT_FINISHES.includes(finish)) return "paint";
-  return "tier2";
-};
+const finishTier = (finish) => TIER_ONE_FINISHES.includes(finish) ? "tier1" : "tier2";
 
 // ── PRICING CONSTANTS ────────────────────────────────────────────────────────
-const MFC_COST_MULT = 0.25;  // your cost = 75% off Modernform retail
-const JK_SELL_MULT  = 0.92;  // your sell = 8% below JK NDP
+const MFC_COST_MULT = 0.22;  // your cost = 78% off Modernform retail
+const DEFAULT_DISCOUNT = 0.56; // used when nothing in a quote has a J&K price (= old 2× cost rule)
+const MAX_DISCOUNT = 1 - MFC_COST_MULT; // at or above this you sell at or below cost
 
 // Get the real NDP for a catalog item — applies correct tier multiplier
-// For pantry pairs, uses the matching JK SKU via jkNdpId
+// For pantry pairs, uses the matching JK SKU via jkNdpId. null when J&K has no such SKU.
 const getNDP = (item, finish) => {
   if (!item) return null;
   // Pantry pair — look up JK NDP by the paired JK SKU id
   const pair = PANTRY_PAIR_MAP[item.id];
   const lookupId = pair ? pair.jkNdpId : item.id;
   const baseNdp = JK_NDP[lookupId];
-  if (!baseNdp) return item.tier1 ? Math.round(item.tier1 * 0.25 * 100) / 100 : null;
+  if (!baseNdp) return null;
   const tier = (finish && FINISH_NDP_TIER[finish]) || "t2";
   return Math.round(baseNdp * NDP_TIER_MULT[tier] * 100) / 100;
 };
 
 // ── PRICING FUNCTIONS ─────────────────────────────────────────────────────────
-// MFC retail (used only for cost calculation)
+// MFC retail — the base for both your cost and your sell price
 const getMFCRetail = (item, finish) => {
   if (!item) return 0;
-  if (TIER_PAINT_FINISHES.includes(finish)) return Math.round(item.tier1 * PAINT_MULTIPLIER);
   if (finish === "Box Only")     { const b = MFC_BOX[item.id]; return b ? b[0] : item.tier1; }
   if (finish === "Box + Deluxe") { const b = MFC_BOX[item.id]; return b ? b[0] + b[2] : item.tier1; }
   if (TIER_ONE_FINISHES.includes(finish)) return item.tier1;
   return item.tier2;
 };
 
-// Your cost = MFC retail × 0.25 (you buy from Modernform at 75% off)
+// Your cost = MFC retail × 0.22 (you buy from Modernform at 78% off)
 // For pantry pairs, retail = BOX + FFD combined
 const getCost = (item, finish) => {
-  if (!item || TIER_PAINT_FINISHES.includes(finish)) return null;
+  if (!item) return null;
   return Math.round(getMFCRetail(item, finish) * MFC_COST_MULT * 100) / 100;
 };
 
-// Your sell:
-//   Standard finishes = JK NDP × 0.92
-//   Box finishes = cost × 2.0 (no JK equivalent)
-//   Paint grade = MFC retail × 0.55
-const getSellPrice = (item, finish) => {
-  if (!item) return 0;
-  if (TIER_PAINT_FINISHES.includes(finish)) return Math.round(getMFCRetail(item, finish) * 0.55);
-  if (TIER_BOX_FINISHES.includes(finish)) {
-    const cost = getCost(item, finish);
-    return cost ? Math.round(cost * 2.0) : 0;
-  }
-  const ndp = getNDP(item, finish);
-  if (!ndp) return Math.round(getMFCRetail(item, finish) * 0.35 * JK_SELL_MULT * 100) / 100;
-  const sell = Math.round(ndp * JK_SELL_MULT * 100) / 100;
-  const cost = getCost(item, finish);
-  // If NDP×0.92 falls below your MFC cost, sell at 1% below JK instead
-  if (cost && sell <= cost) return Math.round(ndp * 0.99 * 100) / 100;
-  return sell;
+// J&K price = NDP — comparison only (not applicable for box finishes)
+const getJKPrice = (item, finish) => {
+  if (!item || TIER_BOX_FINISHES.includes(finish)) return null;
+  return getNDP(item, finish);
 };
 
-// J&K price = NDP (not applicable for box or paint)
-const getJKPrice = (item, finish) => {
-  if (!item || TIER_PAINT_FINISHES.includes(finish) || TIER_BOX_FINISHES.includes(finish)) return null;
-  return getNDP(item, finish) || null;
+// Your sell = MFC retail × (1 − discount)
+const applyDiscount = (retail, discount) => Math.round(retail * (1 - discount) * 100) / 100;
+
+// ── QUOTE LINE PRICING ───────────────────────────────────────────────────────
+// Lines imported from a vendor order carry their own retail / vendorCost;
+// everything else is looked up in the catalog.
+const catalogItem = (line) => cabinets.find(c => c.id === line.id);
+const lineRetail = (line) => line.retail != null ? line.retail : getMFCRetail(catalogItem(line) || line, line.finish);
+const lineCost   = (line) => {
+  if (line.vendorCost != null) return line.vendorCost;
+  const src = catalogItem(line);
+  return src ? getCost(src, line.finish) : (line.cost || 0);
 };
+const lineJK     = (line) => { const src = catalogItem(line); return src ? getJKPrice(src, line.finish) : null; };
+const linePrice  = (line, discount) => line._priceOverridden ? line.price : applyDiscount(lineRetail(line), discount);
+
+// Smallest whole-percent discount that puts the J&K-comparable lines at or under J&K
+const recommendDiscount = (items) => {
+  let retail = 0, jk = 0;
+  items.forEach(l => { const j = lineJK(l); if (j) { retail += lineRetail(l) * l.qty; jk += j * l.qty; } });
+  if (!jk || !retail) return DEFAULT_DISCOUNT;
+  return Math.max(0, Math.ceil((1 - jk / retail) * 100 - 1e-9)) / 100;
+};
+// A quote with no discount set follows the recommendation
+const quoteDiscount = (q) => q.discount != null ? q.discount : recommendDiscount(q.items);
+const pricedItems   = (q) => { const d = quoteDiscount(q); return q.items.map(l => ({ ...l, price: linePrice(l, d) })); };
 
 const getPrice = getMFCRetail;
 
@@ -1002,10 +1001,14 @@ function App() {
   const archiveQuote = useCallback((quoteId) => {
     const q = quotes.find(x => x.id === quoteId);
     if (!q || !q.items.length) return;
+    // Freeze prices and discount so history keeps the numbers that were quoted
+    const items = pricedItems(q);
     const archived = {
       ...q,
+      items,
+      discount: quoteDiscount(q),
       archivedAt: new Date().toISOString(),
-      totalSell: q.items.reduce((s, c) => s + c.price * c.qty, 0),
+      totalSell: items.reduce((s, c) => s + c.price * c.qty, 0),
     };
     setArchivedQuotes(prev => [archived, ...prev].slice(0, 50));
   }, [quotes]);
@@ -1017,12 +1020,12 @@ function App() {
     // If a quote with the same name already exists, update it instead of adding new
     const existing = quotes.find(q => q.name === archived.name || q.name === archived.name + " (restored)");
     if (existing) {
-      setQuotes(prev => prev.map(q => q.id === existing.id ? { ...q, items: archived.items } : q));
+      setQuotes(prev => prev.map(q => q.id === existing.id ? { ...q, items: archived.items, discount: archived.discount } : q));
       setActiveQuoteId(existing.id);
     } else {
       const newId = nextId;
       setNextId(n => n + 1);
-      setQuotes(prev => [...prev, { id: newId, name: archived.name, items: archived.items }]);
+      setQuotes(prev => [...prev, { id: newId, name: archived.name, items: archived.items, discount: archived.discount }]);
       setActiveQuoteId(newId);
     }
     setTab("quote");
@@ -1035,7 +1038,9 @@ function App() {
   }, []);
 
   const activeQuote = quotes.find(q => q.id === activeQuoteId) || quotes[0];
-  const cart = activeQuote?.items || [];
+  const rawCart  = activeQuote?.items || [];
+  const discount = activeQuote ? quoteDiscount(activeQuote) : DEFAULT_DISCOUNT;
+  const cart     = activeQuote ? pricedItems(activeQuote) : [];
 
   const setCart = (updater) => {
     setQuotes(prev => prev.map(q =>
@@ -1059,9 +1064,8 @@ function App() {
     setShowNewQuotePrompt(false);
     setNewQuoteNameInput("");
     if (itemToAdd) {
-      const targetTier = finishTier(finish);
       setQuotes(prev => prev.map(q =>
-        q.id === newId ? { ...q, items: [{ ...itemToAdd, finish, price: itemToAdd[targetTier], qty: 1 }] } : q
+        q.id === newId ? { ...q, items: [{ ...itemToAdd, finish, qty: 1 }] } : q
       ));
       setAddPickerItem(null);
     }
@@ -1104,23 +1108,17 @@ function App() {
   const addToCart = (item) => {
     setCart((prev) => {
       const existing = prev.find((c) => c.id === item.id && c.finish === finish);
-      const sell = getSellPrice(item, finish);
-      const cost = getCost(item, finish);
-      const jk   = getJKPrice(item, finish);
       if (existing) return prev.map((c) => c.id === item.id && c.finish === finish ? { ...c, qty: c.qty + 1 } : c);
-      return [...prev, { ...item, finish, price: sell, cost, jkPrice: jk, qty: 1 }];
+      return [...prev, { ...item, finish, qty: 1 }];
     });
   };
 
   const addToSpecificQuote = (item, quoteId) => {
-    const sell = getSellPrice(item, finish);
-    const cost = getCost(item, finish);
-    const jk   = getJKPrice(item, finish);
     setQuotes(prev => prev.map(q => {
       if (q.id !== quoteId) return q;
       const existing = q.items.find(c => c.id === item.id && c.finish === finish);
       if (existing) return { ...q, items: q.items.map(c => c.id === item.id && c.finish === finish ? { ...c, qty: c.qty + 1 } : c) };
-      return { ...q, items: [...q.items, { ...item, finish, price: sell, cost, jkPrice: jk, qty: 1 }] };
+      return { ...q, items: [...q.items, { ...item, finish, qty: 1 }] };
     }));
     setAddPickerItem(null);
   };
@@ -1130,14 +1128,7 @@ function App() {
 
   const swapCartItem = (idx, newCatalogItem) => {
     const currentFinish = cart[idx]?.finish || finish;
-    setCart(prev => prev.map((c, i) => i === idx ? {
-      ...newCatalogItem,
-      finish:  currentFinish,
-      price:   getSellPrice(newCatalogItem, currentFinish),
-      cost:    getCost(newCatalogItem, currentFinish),
-      jkPrice: getJKPrice(newCatalogItem, currentFinish),
-      qty: c.qty
-    } : c));
+    setCart(prev => prev.map((c, i) => i === idx ? { ...newCatalogItem, finish: currentFinish, qty: c.qty } : c));
     setReplacingItem(null);
     setSwapSearch("");
   };
@@ -1146,48 +1137,26 @@ function App() {
   const SHIPPING_FEE = 260;
   const JK_ASSEMBLY  = 20;
 
-  const changeItemFinish = (itemIdx, newFinish) => {
-    setCart((prev) => prev.map((c, i) => {
-      if (i !== itemIdx) return c;
-      const src = cabinets.find(cab => cab.id === c.id);
-      return { ...c, finish: newFinish,
-        price:   src ? getSellPrice(src, newFinish) : c.price,
-        cost:    src ? getCost(src, newFinish)       : c.cost,
-        jkPrice: src ? getJKPrice(src, newFinish)    : c.jkPrice,
-      };
-    }));
-  };
+  // A finish change re-prices the line from retail, dropping any manual price
+  const withFinish = (c, newFinish) => ({ ...c, finish: newFinish, _priceOverridden: false });
+  const changeItemFinish = (itemIdx, newFinish) => setCart((prev) => prev.map((c, i) => i === itemIdx ? withFinish(c, newFinish) : c));
+  const changeAllFinishes = (newFinish) => setCart((prev) => prev.map((c) => withFinish(c, newFinish)));
 
-  const changeAllFinishes = (newFinish) => {
-    setCart((prev) => prev.map((c) => {
-      const src = cabinets.find(cab => cab.id === c.id);
-      return { ...c, finish: newFinish,
-        price:   src ? getSellPrice(src, newFinish) : c.price,
-        cost:    src ? getCost(src, newFinish)       : c.cost,
-        jkPrice: src ? getJKPrice(src, newFinish)    : c.jkPrice,
-      };
-    }));
-  };
+  // null = follow the recommended discount
+  const setQuoteDiscount = (d) => setQuotes(prev => prev.map(q => q.id === activeQuoteId ? { ...q, discount: d } : q));
 
   // Computed totals for active quote
+  const recommended = recommendDiscount(rawCart);
   const cartCount   = cart.reduce((sum, c) => sum + c.qty, 0);
-  // YOUR COST = MFC retail × 0.25 (75% off Modernform)
-  const cartCost    = cart.reduce((sum, c) => {
-    if (TIER_PAINT_FINISHES.includes(c.finish)) return sum;
-    const src = cabinets.find(cab => cab.id === c.id);
-    return sum + (src ? getCost(src, c.finish) : 0) * c.qty;
-  }, 0);
-  // YOUR SELL = JK NDP × 0.92 (8% below J&K)
-  const cartSell    = cart.reduce((sum, c) => {
-    const src = cabinets.find(cab => cab.id === c.id);
-    return sum + (src ? getSellPrice(src, c.finish) : c.price * 0.92) * c.qty;
-  }, 0);
-  // J&K PRICE = NDP (what they charge)
-  const cartJK      = cart.reduce((sum, c) => {
-    const src = cabinets.find(cab => cab.id === c.id);
-    const jk = src ? getJKPrice(src, c.finish) : null;
-    return sum + (jk || 0) * c.qty;
-  }, 0);
+  const cartRetail  = cart.reduce((sum, c) => sum + lineRetail(c) * c.qty, 0);
+  // YOUR COST = vendor price, else MFC retail × 0.22 (78% off Modernform)
+  const cartCost    = cart.reduce((sum, c) => sum + lineCost(c) * c.qty, 0);
+  // YOUR SELL = MFC retail × (1 − discount), unless a line price was typed in
+  const cartSell    = cart.reduce((sum, c) => sum + c.price * c.qty, 0);
+  // J&K PRICE = NDP (what they charge) — comparison only
+  const cartJK      = cart.reduce((sum, c) => sum + (lineJK(c) || 0) * c.qty, 0);
+  const jkLinesSell = cart.reduce((sum, c) => sum + (lineJK(c) ? c.price * c.qty : 0), 0);
+  const jkMissing   = cart.filter(c => !lineJK(c)).length;
 
   const assemblyFee = cartCount * ASSEMBLY_FEE;
   const shippingFee = SHIPPING_FEE;
@@ -1195,40 +1164,25 @@ function App() {
   const totalSell   = cartSell  + assemblyFee + shippingFee;
   const totalProfit = totalSell - totalCost;
   const marginPct   = totalSell > 0 ? Math.round(totalProfit / totalSell * 100) : 0;
+  const customerSavings = cartRetail - cartSell;
 
-  // J&K total (what client would pay at J&K)
+  // J&K comparison covers only the lines J&K carries
   const jkCabinets  = cartJK;
-  const jkAssembly  = cartCount * JK_ASSEMBLY;
-  const jkTotal     = jkCabinets + jkAssembly + shippingFee;
-  const clientSavings = jkTotal - totalSell;
+  const jkVsYou     = jkCabinets - jkLinesSell;
 
   const isTier2 = TIER_TWO_FINISHES.includes(finish);
-  const isPaint = TIER_PAINT_FINISHES.includes(finish);
   const isBox   = TIER_BOX_FINISHES.includes(finish);
-  const finishDotColor = isPaint ? "#7B4F9E" : isBox ? "#2563EB" : isTier2 ? "#C4956A" : "#8B7355";
-  const finishLabel = isPaint ? "PAINT GRADE" : isBox ? finish.toUpperCase() : isTier2 ? "TIER 2" : "TIER 1";
+  const finishDotColor = isBox ? "#2563EB" : isTier2 ? "#C4956A" : "#8B7355";
+  const finishLabel = isBox ? finish.toUpperCase() : isTier2 ? "TIER 2" : "TIER 1";
   const allItemsCount = quotes.reduce((sum, q) => sum + q.items.reduce((s, i) => s + i.qty, 0), 0);
 
-  // For each cart item, compute all three tier prices using NDP × 0.92
-  const cartWithAllTiers = cart.map(item => {
-    const src = cabinets.find(c => c.id === item.id);
-    const t1ndp = src ? getNDP(src, "White")       : null;
-    const t2ndp = src ? getNDP(src, "Onyx Black")  : null; // use highest t2 for reference
-    const paintRetail = src ? Math.round(src.tier1 * PAINT_MULTIPLIER * 0.55) : null;
-    return {
-      ...item,
-      t1sell: t1ndp ? Math.round(t1ndp * JK_SELL_MULT) : null,
-      t2sell: t2ndp ? Math.round(t2ndp * JK_SELL_MULT) : null,
-      paintSell: paintRetail,
-    };
-  });
-
-  const t1CabSell  = cartWithAllTiers.reduce((s, c) => s + (c.t1sell || 0) * c.qty, 0);
-  const t2CabSell  = cartWithAllTiers.reduce((s, c) => s + (c.t2sell || 0) * c.qty, 0);
-  const pgCabSell  = cartWithAllTiers.reduce((s, c) => s + (c.paintSell || 0) * c.qty, 0);
-  const t1Total    = t1CabSell  + assemblyFee + shippingFee;
-  const t2Total    = t2CabSell  + assemblyFee + shippingFee;
-  const pgTotal    = pgCabSell  + assemblyFee + shippingFee;
+  // Same cabinets in each tier at this quote's discount
+  const tierTotal = (tierFinish) => cart.reduce((s, c) => {
+    const src = catalogItem(c);
+    return s + (src ? applyDiscount(getMFCRetail(src, tierFinish), discount) : c.price) * c.qty;
+  }, 0) + assemblyFee + shippingFee;
+  const t1Total = tierTotal("White");
+  const t2Total = tierTotal("Natural");
 
   return (
     <div style={{ fontFamily: "'DM Mono', 'Courier New', monospace", background: "#F5F2ED", minHeight: "100vh", color: "#1a1a1a", maxWidth: 640, margin: "0 auto", position: "relative" }}>
@@ -1417,52 +1371,40 @@ function App() {
                   </div>
                 </div>
                 <div style={{ display: "flex", gap: 6 }}>
-                  {!isPaint && (
-                    <div style={{ flex: 1, background: "#F0F7F2", borderRadius: 8, padding: "10px 12px", border: "1.5px solid #A8D5B5" }}>
-                      <div style={{ fontSize: 9, letterSpacing: 1.5, color: "#4a7c59", marginBottom: 4, fontWeight: 600 }}>YOUR COST</div>
-                      <div style={{ fontSize: 18, fontWeight: 700, color: "#2d6b45", lineHeight: 1 }}>{fmt(getCost(item, finish))}</div>
-                    </div>
-                  )}
-                  <div style={{ flex: isPaint ? 2 : 1, background: isPaint ? "#F5F0FA" : "#1a1a1a", borderRadius: 8, padding: "10px 12px", border: isPaint ? "1.5px solid #C4A8E0" : "none" }}>
-                    <div style={{ fontSize: 9, letterSpacing: 1.5, color: isPaint ? "#7B4F9E" : "#C4956A", marginBottom: 4, fontWeight: 600 }}>
-                      {isPaint ? "SELL PRICE" : "YOUR SELL"}
-                    </div>
-                    <div style={{ fontSize: 18, fontWeight: 700, color: isPaint ? "#7B4F9E" : "#C4956A", lineHeight: 1 }}>{fmt(getSellPrice(item, finish))}</div>
-                    {!isPaint && getCost(item, finish) > 0 && (
-                      <div style={{ fontSize: 9, color: "#C4956A", opacity: 0.6, marginTop: 3 }}>
-                        {Math.round((getSellPrice(item, finish) - getCost(item, finish)) / getSellPrice(item, finish) * 100)}% margin
+                  <div style={{ flex: 1, background: "#F0F7F2", borderRadius: 8, padding: "10px 12px", border: "1.5px solid #A8D5B5" }}>
+                    <div style={{ fontSize: 9, letterSpacing: 1.5, color: "#4a7c59", marginBottom: 4, fontWeight: 600 }}>YOUR COST</div>
+                    <div style={{ fontSize: 18, fontWeight: 700, color: "#2d6b45", lineHeight: 1 }}>{fmt(getCost(item, finish))}</div>
+                  </div>
+                  <div style={{ flex: 1, background: "#1a1a1a", borderRadius: 8, padding: "10px 12px" }}>
+                    <div style={{ fontSize: 9, letterSpacing: 1.5, color: "#C4956A", marginBottom: 4, fontWeight: 600 }}>MF RETAIL</div>
+                    <div style={{ fontSize: 18, fontWeight: 700, color: "#C4956A", lineHeight: 1 }}>{fmt(getMFCRetail(item, finish))}</div>
+                  </div>
+                  <div style={{ flex: 1, background: "#FEF3EB", borderRadius: 8, padding: "10px 12px", border: "1.5px solid #F0C89A" }}>
+                    <div style={{ fontSize: 9, letterSpacing: 1.5, color: "#8B5E3C", marginBottom: 4, fontWeight: 600 }}>J&K PRICE</div>
+                    <div style={{ fontSize: 18, fontWeight: 700, color: "#8B5E3C", lineHeight: 1 }}>{getJKPrice(item, finish) ? fmt(getJKPrice(item, finish)) : "—"}</div>
+                    {getJKPrice(item, finish) && (
+                      <div style={{ fontSize: 9, color: "#8B5E3C", opacity: 0.6, marginTop: 3 }}>
+                        {Math.round((1 - getJKPrice(item, finish) / getMFCRetail(item, finish)) * 100)}% off retail
                       </div>
                     )}
                   </div>
-                  {!isPaint && (
-                    <div style={{ flex: 1, background: "#FEF3EB", borderRadius: 8, padding: "10px 12px", border: "1.5px solid #F0C89A" }}>
-                      <div style={{ fontSize: 9, letterSpacing: 1.5, color: "#8B5E3C", marginBottom: 4, fontWeight: 600 }}>J&K PRICE</div>
-                      <div style={{ fontSize: 18, fontWeight: 700, color: "#8B5E3C", lineHeight: 1 }}>{getJKPrice(item, finish) ? fmt(getJKPrice(item, finish)) : "—"}</div>
-                    </div>
-                  )}
-                  {isPaint && (
-                    <div style={{ flex: 1, background: "#F5F0FA", borderRadius: 8, padding: "10px 12px", border: "1.5px solid #C4A8E0" }}>
-                      <div style={{ fontSize: 9, letterSpacing: 1.5, color: "#7B4F9E", marginBottom: 4, fontWeight: 600 }}>MFC REF</div>
-                      <div style={{ fontSize: 18, fontWeight: 700, color: "#7B4F9E", opacity: 0.5, textDecoration: "line-through", lineHeight: 1 }}>{fmt(item.tier1)}</div>
-                    </div>
-                  )}
                 </div>
                 {/* Linear foot pricing */}
                 {(() => {
-                  const wMatch = item.description.match(/^(\d+)["x]/);
+                  const wMatch = item.description.match(/^(d+)["x]/);
                   const widthIn = wMatch ? parseInt(wMatch[1]) : null;
                   if (!widthIn) return null;
                   const widthFt = widthIn / 12;
-                  const sellPerFt = getSellPrice(item, finish) / widthFt;
-                  const costPerFt = !isPaint ? getCost(item, finish) / widthFt : null;
+                  const retailPerFt = getMFCRetail(item, finish) / widthFt;
+                  const costPerFt = getCost(item, finish) / widthFt;
                   return (
-                    <div style={{ marginTop: 6, display: "flex", alignItems: "center", gap: 6, padding: "6px 10px", background: isPaint ? "#F5F0FA" : "#F5F2ED", borderRadius: 7, border: isPaint ? "1px solid #C4A8E040" : "none" }}>
+                    <div style={{ marginTop: 6, display: "flex", alignItems: "center", gap: 6, padding: "6px 10px", background: "#F5F2ED", borderRadius: 7 }}>
                       <span style={{ fontSize: 9, opacity: 0.4, letterSpacing: 1, flexShrink: 0 }}>{widthIn}" · {widthFt.toFixed(2)} LIN FT</span>
                       <div style={{ flex: 1, height: 1, background: "#D4CBB8" }} />
-                      {!isPaint && <><span style={{ fontSize: 11, color: "#4a7c59", fontWeight: 600 }}>${costPerFt.toFixed(0)}/ft</span>
-                      <span style={{ fontSize: 10, opacity: 0.3 }}>cost</span></>}
-                      <span style={{ fontSize: 11, color: isPaint ? "#7B4F9E" : "#C4956A", fontWeight: 600 }}>${sellPerFt.toFixed(0)}/ft</span>
-                      <span style={{ fontSize: 10, opacity: 0.3 }}>sell</span>
+                      <span style={{ fontSize: 11, color: "#4a7c59", fontWeight: 600 }}>${costPerFt.toFixed(0)}/ft</span>
+                      <span style={{ fontSize: 10, opacity: 0.3 }}>cost</span>
+                      <span style={{ fontSize: 11, color: "#C4956A", fontWeight: 600 }}>${retailPerFt.toFixed(0)}/ft</span>
+                      <span style={{ fontSize: 10, opacity: 0.3 }}>retail</span>
                     </div>
                   );
                 })()}
@@ -1530,49 +1472,48 @@ function App() {
                   <div style={{ fontSize: 11, opacity: 0.5, marginTop: 2 }}>{cartCount} cabinet{cartCount !== 1 ? "s" : ""}</div>
                 </div>
               </div>
-              {/* Print — tier comparison table */}
+              {/* Print — line items at retail and discounted price */}
               <table>
                 <thead><tr>
-                  <th style={{ width: "10%" }}>Item #</th>
-                  <th style={{ width: "28%" }}>Description</th>
+                  <th style={{ width: "11%" }}>Item #</th>
+                  <th style={{ width: "33%" }}>Description</th>
+                  <th style={{ width: "13%" }}>Finish</th>
                   <th style={{ width: "6%", textAlign: "center" }}>Qty</th>
-                  <th style={{ width: "14%", textAlign: "right", background: "#EDE9E2" }}>T1 / Unit</th>
-                  <th style={{ width: "14%", textAlign: "right", background: "#EDE9E2" }}>T1 Total</th>
-                  <th style={{ width: "14%", textAlign: "right", background: "#FEF3EB" }}>T2 / Unit</th>
-                  <th style={{ width: "14%", textAlign: "right", background: "#FEF3EB" }}>T2 Total</th>
+                  <th style={{ width: "12%", textAlign: "right" }}>Retail</th>
+                  <th style={{ width: "12%", textAlign: "right", background: "#EDE9E2" }}>Your Price</th>
+                  <th style={{ width: "13%", textAlign: "right", background: "#EDE9E2" }}>Total</th>
                 </tr></thead>
                 <tbody>
-                  {cartWithAllTiers.map((item, i) => (
+                  {cart.map((item, i) => (
                     <tr key={i}>
                       <td style={{ fontSize: 10, color: "#8B7355", fontWeight: 600 }}>{item.id}</td>
                       <td style={{ fontSize: 11 }}>{item.description}</td>
+                      <td style={{ fontSize: 10 }}>{item.finish}</td>
                       <td style={{ textAlign: "center" }}>{item.qty}</td>
-                      <td style={{ textAlign: "right", background: "#F5F4F2" }}>{item.t1sell ? fmt(item.t1sell) : "—"}</td>
-                      <td style={{ textAlign: "right", fontWeight: 600, background: "#F5F4F2" }}>{item.t1sell ? fmt(item.t1sell * item.qty) : "—"}</td>
-                      <td style={{ textAlign: "right", background: "#FFFBF7" }}>{item.t2sell ? fmt(item.t2sell) : "—"}</td>
-                      <td style={{ textAlign: "right", fontWeight: 600, background: "#FFFBF7" }}>{item.t2sell ? fmt(item.t2sell * item.qty) : "—"}</td>
+                      <td style={{ textAlign: "right", opacity: 0.5, textDecoration: "line-through" }}>{fmt(lineRetail(item))}</td>
+                      <td style={{ textAlign: "right", background: "#F5F4F2" }}>{fmt(item.price)}</td>
+                      <td style={{ textAlign: "right", fontWeight: 600, background: "#F5F4F2" }}>{fmt(item.price * item.qty)}</td>
                     </tr>
                   ))}
                 </tbody>
               </table>
-              <div style={{ marginTop: 20, display: "flex", gap: 10 }}>
-                {[
-                  { label: "TIER 1", bg: "#EDE9E2", border: "#D4CBB8", sub: "Gray, White, Slate, Espresso", cab: t1CabSell, total: t1Total, col: "#1a1a1a" },
-                  { label: "TIER 2", bg: "#FEF3EB", border: "#F0C89A", sub: "Blue, Natural, Onyx, Sage", cab: t2CabSell, total: t2Total, col: "#8B5E3C" },
-                  { label: "PAINT GRADE", bg: "#F5F0FA", border: "#C4A8E0", sub: "Custom painted", cab: pgCabSell, total: pgTotal, col: "#7B4F9E" },
-                ].map(({ label, bg, border, sub, cab, total, col }) => (
-                  <div key={label} style={{ flex: 1, border: `1.5px solid ${border}`, borderRadius: 8, overflow: "hidden" }}>
-                    <div style={{ background: bg, padding: "8px 10px", fontSize: 10, fontWeight: 700, color: col }}>{label}<br/><span style={{ fontSize: 8, fontWeight: 400, opacity: 0.6 }}>{sub}</span></div>
-                    <div style={{ padding: "8px 10px" }}>
-                      {[["Cabinets", fmt(cab)], ["Assembly", fmt(assemblyFee)], ["Shipping", fmt(shippingFee)]].map(([l,v]) => (
-                        <div key={l} style={{ display:"flex", justifyContent:"space-between", fontSize:10, marginBottom:4, paddingBottom:4, borderBottom:`1px solid ${border}` }}>
-                          <span style={{ opacity:0.6 }}>{l}</span><span>{v}</span>
-                        </div>
-                      ))}
-                      <div style={{ display:"flex", justifyContent:"space-between", fontSize:14, fontWeight:700, paddingTop:2, color: col }}><span>Total</span><span>{fmt(total)}</span></div>
-                    </div>
+              <div style={{ marginTop: 20, display: "flex", justifyContent: "flex-end" }}>
+                <div style={{ width: "55%", border: "1.5px solid #D4CBB8", borderRadius: 8, overflow: "hidden" }}>
+                  <div style={{ padding: "10px 12px" }}>
+                    {[
+                      ["Retail value", fmt(cartRetail)],
+                      [`Your discount (${Math.round(discount * 100)}% off retail)`, "− " + fmt(customerSavings)],
+                      ["Cabinets", fmt(cartSell)],
+                      [`Assembly (${cartCount} × $${ASSEMBLY_FEE})`, fmt(assemblyFee)],
+                      ["Shipping", fmt(shippingFee)],
+                    ].map(([l, v]) => (
+                      <div key={l} style={{ display: "flex", justifyContent: "space-between", fontSize: 11, marginBottom: 5, paddingBottom: 5, borderBottom: "1px solid #EDE9E2" }}>
+                        <span style={{ opacity: 0.6 }}>{l}</span><span>{v}</span>
+                      </div>
+                    ))}
+                    <div style={{ display: "flex", justifyContent: "space-between", fontSize: 15, fontWeight: 700, paddingTop: 2 }}><span>Total</span><span>{fmt(totalSell)}</span></div>
                   </div>
-                ))}
+                </div>
               </div>
               <div style={{ marginTop: 28, paddingTop: 12, borderTop: "1px solid #D4CBB8", display: "flex", justifyContent: "space-between", fontSize: 10, opacity: 0.4 }}>
                 <span>ALFA STUDIO · Cabinet &amp; Closet Solutions</span>
@@ -1593,6 +1534,43 @@ function App() {
           {cart.length > 0 && (
             <div className="no-print">
 
+              {/* Discount off MF retail */}
+              <div style={{ background: "#1a1a1a", color: "#F5F2ED", borderRadius: 12, padding: "14px 16px", marginBottom: 12 }}>
+                <div style={{ fontSize: 9, letterSpacing: 1.5, color: "#C4956A", fontWeight: 700, marginBottom: 8 }}>DISCOUNT OFF MF RETAIL</div>
+                <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                    <input
+                      key={`${activeQuoteId}-${discount}`}
+                      data-discount
+                      type="number" inputMode="numeric" min="0" max="99" step="1"
+                      defaultValue={Math.round(discount * 100)}
+                      onBlur={e => {
+                        const v = parseFloat(e.target.value);
+                        if (!isNaN(v) && v >= 0 && v < 100) setQuoteDiscount(Math.round(v) / 100);
+                        else e.target.value = Math.round(discount * 100);
+                      }}
+                      onKeyDown={e => e.key === "Enter" && e.target.blur()}
+                      style={{ width: 64, padding: "6px 8px", fontSize: 22, fontWeight: 800, textAlign: "right", border: "1.5px solid #C4956A", borderRadius: 8, background: "#2a2a2a", color: "#C4956A", fontFamily: "inherit" }}
+                    />
+                    <span style={{ fontSize: 22, fontWeight: 800, color: "#C4956A" }}>%</span>
+                  </div>
+                  {activeQuote?.discount == null ? (
+                    <span style={{ fontSize: 10, color: "#C4956A", background: "#C4956A22", padding: "4px 9px", borderRadius: 8 }}>AUTO · at or under J&K</span>
+                  ) : (
+                    <button onClick={() => setQuoteDiscount(null)} style={{
+                      background: "transparent", border: "1px solid #C4956A66", color: "#C4956A", borderRadius: 8,
+                      padding: "6px 10px", fontSize: 11, cursor: "pointer", fontFamily: "inherit"
+                    }}>Use recommended {Math.round(recommended * 100)}%</button>
+                  )}
+                </div>
+                <div style={{ fontSize: 11, opacity: 0.6, marginTop: 8 }}>
+                  Retail {fmt(cartRetail)} → your price {fmt(cartSell)} · {marginPct}% margin
+                </div>
+                {discount >= MAX_DISCOUNT && (
+                  <div style={{ fontSize: 11, color: "#ff8a7a", marginTop: 6, fontWeight: 600 }}>⚠ {Math.round(MAX_DISCOUNT * 100)}%+ off is at or below your cost</div>
+                )}
+              </div>
+
               {/* Cabinet line items */}
               <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 14 }}>
                 {cart.map((item, i) => (
@@ -1606,14 +1584,10 @@ function App() {
                         <div style={{ fontSize: 10, color: "#8B7355", fontWeight: 500 }}>{item.id}{PANTRY_PAIR_MAP[item.id] && <span style={{ marginLeft: 5, fontSize: 9, background: "#F0F7F2", color: "#4a7c59", padding: "1px 5px", borderRadius: 5, border: "1px solid #C8E6D0" }}>BOX+FFD</span>}{item.isCustom && <span style={{ marginLeft: 6, fontSize: 9, background: "#FEF3EB", color: "#C4956A", padding: "1px 6px", borderRadius: 6, border: "1px solid #F0C89A" }}>CUSTOM SIZE · $/ft³</span>}</div>
                         <div style={{ fontSize: 12, lineHeight: 1.4 }}>{item.description}</div>
                         <div style={{ display: "flex", gap: 5, marginTop: 5, flexWrap: "wrap" }}>
-                          {TIER_PAINT_FINISHES.includes(item.finish)
-                            ? <span style={{ fontSize: 11, color: "#7B4F9E", fontWeight: 700, background: "#F5F0FA", padding: "3px 8px", borderRadius: 6 }}>PAINT GRADE · {fmt(item.price)}</span>
-                            : (<>
-                                <span style={{ fontSize: 12, fontWeight: 700, color: "#2d6b45", background: "#EBF5EF", padding: "3px 9px", borderRadius: 6 }}>Cost {item.cost ? fmt(item.cost) : "—"}</span>
-                                <span style={{ fontSize: 12, fontWeight: 700, color: "#C4956A", background: "#1a1a1a", padding: "3px 9px", borderRadius: 6 }}>Sell {fmt(item.price)}</span>
-                                {item.jkPrice && <span style={{ fontSize: 12, fontWeight: 600, color: "#8B5E3C", background: "#FEF3EB", padding: "3px 9px", borderRadius: 6, border: "1px solid #F0C89A" }}>J&K {fmt(item.jkPrice)}</span>}
-                              </>)
-                          }
+                          <span style={{ fontSize: 12, fontWeight: 600, color: "#999", background: "#F5F2ED", padding: "3px 9px", borderRadius: 6, textDecoration: "line-through" }}>Retail {fmt(lineRetail(item))}</span>
+                          <span style={{ fontSize: 12, fontWeight: 700, color: "#2d6b45", background: "#EBF5EF", padding: "3px 9px", borderRadius: 6 }}>Cost {fmt(lineCost(item))}</span>
+                          <span style={{ fontSize: 12, fontWeight: 700, color: "#C4956A", background: "#1a1a1a", padding: "3px 9px", borderRadius: 6 }}>Sell {fmt(item.price)}</span>
+                          {lineJK(item) && <span style={{ fontSize: 12, fontWeight: 600, color: "#8B5E3C", background: "#FEF3EB", padding: "3px 9px", borderRadius: 6, border: "1px solid #F0C89A" }}>J&K {fmt(lineJK(item))}</span>}
                         </div>
                       </div>
                       <button onClick={() => removeFromCart(i)} style={{ border: "none", background: "none", color: "#ccc", fontSize: 18, cursor: "pointer", paddingLeft: 8, lineHeight: 1, flexShrink: 0 }}>×</button>
@@ -1625,7 +1599,7 @@ function App() {
                         border: "1px solid #D4CBB8", borderRadius: 6, padding: "5px 9px",
                         fontSize: 11, cursor: "pointer", fontFamily: "inherit", flex: 1
                       }}>
-                        <span style={{ width: 7, height: 7, borderRadius: "50%", flexShrink: 0, background: TIER_PAINT_FINISHES.includes(item.finish) ? "#7B4F9E" : TIER_TWO_FINISHES.includes(item.finish) ? "#C4956A" : "#8B7355" }} />
+                        <span style={{ width: 7, height: 7, borderRadius: "50%", flexShrink: 0, background: TIER_BOX_FINISHES.includes(item.finish) ? "#2563EB" : TIER_TWO_FINISHES.includes(item.finish) ? "#C4956A" : "#8B7355" }} />
                         <span style={{ flex: 1, textAlign: "left", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{item.finish}</span>
                         <span style={{ opacity: 0.3, fontSize: 9 }}>▾</span>
                       </button>
@@ -1680,52 +1654,53 @@ function App() {
               <div style={{ background: "#fff", borderRadius: 12, border: "1px solid #E5DFD6", overflow: "hidden", marginBottom: 12 }}>
                 <div style={{ padding: "14px 16px" }}>
                   {/* Cost vs Sell row — the main event */}
-                  {!cart.every(c => TIER_PAINT_FINISHES.includes(c.finish)) && (
-                    <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
-                      <div style={{ flex: 1, background: "#EBF5EF", borderRadius: 10, padding: "12px 14px", border: "1.5px solid #A8D5B5" }}>
-                        <div style={{ fontSize: 9, letterSpacing: 1.5, color: "#2d6b45", fontWeight: 700, marginBottom: 4 }}>YOUR COST</div>
-                        <div style={{ fontSize: 22, fontWeight: 800, color: "#2d6b45", lineHeight: 1 }}>{fmt(totalCost)}</div>
-                        <div style={{ fontSize: 9, color: "#2d6b45", opacity: 0.6, marginTop: 3 }}>incl. assembly + shipping</div>
-                      </div>
-                      <div style={{ flex: 1, background: "#1a1a1a", borderRadius: 10, padding: "12px 14px" }}>
-                        <div style={{ fontSize: 9, letterSpacing: 1.5, color: "#C4956A", fontWeight: 700, marginBottom: 4 }}>YOUR SELL</div>
-                        <div style={{ fontSize: 22, fontWeight: 800, color: "#C4956A", lineHeight: 1 }}>{fmt(totalSell)}</div>
-                        <div style={{ fontSize: 9, color: "#C4956A", opacity: 0.6, marginTop: 3 }}>{marginPct}% margin · {fmt(totalProfit)} profit</div>
-                      </div>
+                  <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
+                    <div style={{ flex: 1, background: "#EBF5EF", borderRadius: 10, padding: "12px 14px", border: "1.5px solid #A8D5B5" }}>
+                      <div style={{ fontSize: 9, letterSpacing: 1.5, color: "#2d6b45", fontWeight: 700, marginBottom: 4 }}>YOUR COST</div>
+                      <div style={{ fontSize: 22, fontWeight: 800, color: "#2d6b45", lineHeight: 1 }}>{fmt(totalCost)}</div>
+                      <div style={{ fontSize: 9, color: "#2d6b45", opacity: 0.6, marginTop: 3 }}>incl. assembly + shipping</div>
                     </div>
-                  )}
-                  {cart.every(c => TIER_PAINT_FINISHES.includes(c.finish)) && (
-                    <div style={{ background: "#F5F0FA", borderRadius: 10, padding: "12px 14px", border: "1.5px solid #C4A8E0", marginBottom: 12 }}>
-                      <div style={{ fontSize: 9, letterSpacing: 1.5, color: "#7B4F9E", fontWeight: 700, marginBottom: 4 }}>PAINT GRADE TOTAL</div>
-                      <div style={{ fontSize: 22, fontWeight: 800, color: "#7B4F9E", lineHeight: 1 }}>{fmt(totalSell)}</div>
+                    <div style={{ flex: 1, background: "#1a1a1a", borderRadius: 10, padding: "12px 14px" }}>
+                      <div style={{ fontSize: 9, letterSpacing: 1.5, color: "#C4956A", fontWeight: 700, marginBottom: 4 }}>YOUR SELL</div>
+                      <div style={{ fontSize: 22, fontWeight: 800, color: "#C4956A", lineHeight: 1 }}>{fmt(totalSell)}</div>
+                      <div style={{ fontSize: 9, color: "#C4956A", opacity: 0.6, marginTop: 3 }}>{marginPct}% margin · {fmt(totalProfit)} profit</div>
                     </div>
-                  )}
+                  </div>
                   {/* Line items */}
                   {[
-                    ["Cabinets", fmt(cartSell)],
-                    [`Assembly (${cartCount} × $20)`, fmt(assemblyFee)],
+                    ["MF retail", fmt(cartRetail)],
+                    [`Cabinets at ${Math.round(discount * 100)}% off`, fmt(cartSell)],
+                    [`Assembly (${cartCount} × $${ASSEMBLY_FEE})`, fmt(assemblyFee)],
                     ["Shipping", fmt(shippingFee)],
                   ].map(([l, v]) => (
                     <div key={l} style={{ display: "flex", justifyContent: "space-between", marginBottom: 6, fontSize: 12 }}>
                       <span style={{ opacity: 0.4 }}>{l}</span><span style={{ opacity: 0.7 }}>{v}</span>
                     </div>
                   ))}
-                  {/* J&K comparison */}
-                  {!cart.every(c => TIER_PAINT_FINISHES.includes(c.finish)) && cartJK > 0 && (
-                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 12px", background: "#FEF3EB", borderRadius: 8, fontSize: 12, marginTop: 10, border: "1px solid #F0C89A" }}>
-                      <span style={{ color: "#8B5E3C" }}>J&K charges clients <strong>{fmt(jkTotal)}</strong></span>
-                      <span style={{ color: "#2d6b45", fontWeight: 700 }}>↓ {fmt(clientSavings)} savings</span>
+                  {/* J&K comparison — cabinets J&K carries */}
+                  {cartJK > 0 && (
+                    <div style={{ padding: "10px 12px", background: "#FEF3EB", borderRadius: 8, fontSize: 12, marginTop: 10, border: "1px solid #F0C89A" }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                        <span style={{ color: "#8B5E3C" }}>J&K would charge <strong>{fmt(jkCabinets)}</strong> · you {fmt(jkLinesSell)}</span>
+                        <span style={{ color: jkVsYou >= 0 ? "#2d6b45" : "#c0392b", fontWeight: 700 }}>
+                          {jkVsYou >= 0 ? `↓ ${fmt(jkVsYou)} under` : `↑ ${fmt(-jkVsYou)} over`}
+                        </span>
+                      </div>
+                      {jkMissing > 0 && (
+                        <div style={{ fontSize: 10, color: "#8B5E3C", opacity: 0.6, marginTop: 4 }}>
+                          Cabinets only · {jkMissing} line{jkMissing !== 1 ? "s" : ""} J&K doesn't carry left out
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>
               </div>
 
-              {/* Tier comparison */}
+              {/* Tier comparison at this discount */}
               <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
                 {[
                   { label: "TIER 1", sub: "Gray · White · Slate · Espresso", total: t1Total, border: "#D4CBB8", hdr: "#F5F2ED", col: "#1a1a1a" },
                   { label: "TIER 2", sub: "Blue · Onyx · Sage · Natural", total: t2Total, border: "#F0C89A", hdr: "#FEF3EB", col: "#8B5E3C" },
-                  { label: "PAINT", sub: "Custom painted", total: pgTotal, border: "#C4A8E0", hdr: "#F5F0FA", col: "#7B4F9E" },
                 ].map(({ label, sub, total, border, hdr, col }) => (
                   <div key={label} style={{ flex: 1, border: `1.5px solid ${border}`, borderRadius: 10, overflow: "hidden" }}>
                     <div style={{ background: hdr, padding: "7px 10px", fontSize: 9, fontWeight: 700, color: col, letterSpacing: 1 }}>{label}</div>
@@ -1782,12 +1757,12 @@ function App() {
           const widthFt = widthIn / 12;
           const unitRetail = item[lftTier];
           const unitCost = unitRetail * MFC_COST_MULT;
-          const unitSell = unitRetail * 0.35 * JK_SELL_MULT; // approx NDP×0.92
-          const jkUnit = unitRetail * 0.35; // approx NDP
+          const unitSell = applyDiscount(unitRetail, discount);
+          const jkUnit = getJKPrice(item, lftFinish);
           const type = isTall(item) ? "tall" : isUpper(item) ? "upper" : isLower(item) ? "lower" : "other";
           const costPerFt = widthFt > 0 ? unitCost / widthFt : null;
           const sellPerFt = widthFt > 0 ? unitSell / widthFt : null;
-          const jkPerFt   = widthFt > 0 ? jkUnit  / widthFt : null;
+          const jkPerFt   = widthFt > 0 && jkUnit ? jkUnit / widthFt : null;
           return { ...item, widthIn, widthFt, unitRetail, unitCost, unitSell, jkUnit, type, costPerFt, sellPerFt, jkPerFt };
         }).filter(r => r.widthFt > 0 && r.type !== "other");
 
@@ -1843,15 +1818,15 @@ function App() {
                   <div style={{ fontSize: 10, opacity: 0.4, letterSpacing: 1, marginBottom: 8 }}>{label.toUpperCase()}</div>
                   <div style={{ display: "flex", gap: 8 }}>
                     <div style={{ flex: 1, background: "#2a2a2a", borderRadius: 8, padding: "10px 12px" }}>
-                      <div style={{ fontSize: 8, color: "#4a7c59", letterSpacing: 1, marginBottom: 4 }}>YOUR COST (NDP)</div>
+                      <div style={{ fontSize: 8, color: "#4a7c59", letterSpacing: 1, marginBottom: 4 }}>YOUR COST</div>
                       <div style={{ fontSize: 18, fontWeight: 700, color: "#4a7c59" }}>{fmtF(avgPerFt(r, "costPerFt"))}<span style={{ fontSize: 10, opacity: 0.5 }}>/ft</span></div>
                     </div>
                     <div style={{ flex: 1, background: "#2a2a2a", borderRadius: 8, padding: "10px 12px" }}>
-                      <div style={{ fontSize: 8, color: "#C4956A", letterSpacing: 1, marginBottom: 4 }}>SELL PRICE</div>
+                      <div style={{ fontSize: 8, color: "#C4956A", letterSpacing: 1, marginBottom: 4 }}>SELL @ {Math.round(discount * 100)}% OFF</div>
                       <div style={{ fontSize: 18, fontWeight: 700, color: "#C4956A" }}>{fmtF(avgPerFt(r, "sellPerFt"))}<span style={{ fontSize: 10, opacity: 0.5 }}>/ft</span></div>
                     </div>
                     <div style={{ flex: 1, background: "#2a2a2a", borderRadius: 8, padding: "10px 12px" }}>
-                      <div style={{ fontSize: 8, color: "#8B5E3C", letterSpacing: 1, marginBottom: 4 }}>J&K EST.</div>
+                      <div style={{ fontSize: 8, color: "#8B5E3C", letterSpacing: 1, marginBottom: 4 }}>J&K</div>
                       <div style={{ fontSize: 18, fontWeight: 700, color: "#8B5E3C" }}>{fmtF(avgPerFt(r, "jkPerFt"))}<span style={{ fontSize: 10, opacity: 0.5 }}>/ft</span></div>
                     </div>
                   </div>
@@ -1905,9 +1880,10 @@ function App() {
             {quotes.map(q => {
               if (!q.items.length) return null;
               const qTier = (f) => finishTier(f);
-              const upperItems = q.items.filter(i => isUpper(i));
-              const lowerItems = q.items.filter(i => isLower(i));
-              const tallItems  = q.items.filter(i => isTall(i));
+              const qItems = pricedItems(q);
+              const upperItems = qItems.filter(i => isUpper(i));
+              const lowerItems = qItems.filter(i => isLower(i));
+              const tallItems  = qItems.filter(i => isTall(i));
               const calcLft = (items) => items.reduce((s, i) => s + (getWidth(i.description) / 12) * i.qty, 0);
               const calcSell = (items) => items.reduce((s, i) => s + i.price * i.qty, 0);
               const upperLft = calcLft(upperItems), lowerLft = calcLft(lowerItems), tallLft = calcLft(tallItems);
@@ -2394,7 +2370,7 @@ Respond ONLY with valid JSON — no markdown, no backticks:
           return {
             retail,
             cost: Math.round(retail * MFC_COST_MULT),
-            sell: Math.round(retail * 0.35 * JK_SELL_MULT),
+            sell: Math.round(applyDiscount(retail, discount)),
             cf: Math.round(cf * 100) / 100,
             ratePerCf: Math.round(rate),
           };
@@ -2429,9 +2405,6 @@ Respond ONLY with valid JSON — no markdown, no backticks:
               itemsToAdd.push({
                 ...match,
                 finish: scanFinish,
-                price: getSellPrice(match, scanFinish),
-                cost:  getCost(match, scanFinish),
-                jkPrice: getJKPrice(match, scanFinish),
                 qty,
               });
             } else {
@@ -2452,9 +2425,7 @@ Respond ONLY with valid JSON — no markdown, no backticks:
                 tier1: est.retail,
                 tier2: est.retail,
                 finish: scanFinish,
-                price: est.sell,
                 cost:  est.cost,
-                jkPrice: null,
                 qty,
                 isCustom: true,
                 cubicFt: est.cf,
@@ -2672,11 +2643,11 @@ Respond ONLY with valid JSON — no markdown, no backticks:
                                   <div style={{ marginTop: 8, display: "flex", gap: 6 }}>
                                     <div style={{ flex: 1, background: "#F0F7F2", borderRadius: 6, padding: "6px 8px" }}>
                                       <div style={{ fontSize: 8, color: "#4a7c59", marginBottom: 1 }}>COST</div>
-                                      <div style={{ fontSize: 13, fontWeight: 600, color: "#4a7c59" }}>{fmt(match[tier] * MFC_COST_MULT)}</div>
+                                      <div style={{ fontSize: 13, fontWeight: 600, color: "#4a7c59" }}>{fmt(getCost(match, scanFinish))}</div>
                                     </div>
                                     <div style={{ flex: 1, background: "#1a1a1a", borderRadius: 6, padding: "6px 8px" }}>
                                       <div style={{ fontSize: 8, color: "#C4956A", marginBottom: 1 }}>SELL</div>
-                                      <div style={{ fontSize: 13, fontWeight: 600, color: "#C4956A" }}>{fmt(match[tier] * 0.35 * JK_SELL_MULT)}</div>
+                                      <div style={{ fontSize: 13, fontWeight: 600, color: "#C4956A" }}>{fmt(applyDiscount(getMFCRetail(match, scanFinish), discount))}</div>
                                     </div>
                                     <div style={{ flex: 1, background: "#F5F2ED", borderRadius: 6, padding: "6px 8px" }}>
                                       <div style={{ fontSize: 8, opacity: 0.4, marginBottom: 1 }}>MATCH</div>
@@ -2743,7 +2714,7 @@ Respond ONLY with valid JSON — no markdown, no backticks:
                     const snapped = { ...s, width: snapWidth(s.width) };
                     const match = matchCatalog(snapped);
                     if (match) {
-                      totalSellEst += getSellPrice(match, scanFinish) * qty;
+                      totalSellEst += applyDiscount(getMFCRetail(match, scanFinish), discount) * qty;
                       totalCostEst += (getCost(match, scanFinish) || 0) * qty;
                       totalQty += qty;
                       exactCount++;
@@ -2852,7 +2823,6 @@ Respond ONLY with valid JSON — no markdown, no backticks:
               const date = new Date(q.archivedAt);
               const dateStr = date.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
               const timeStr = date.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
-              const isPaint = q.items.every(c => TIER_PAINT_FINISHES.includes(c.finish));
               const finishes = [...new Set(q.items.map(c => c.finish))];
               return (
                 <div key={q.archivedAt} style={{ background: "#fff", borderRadius: 12, border: "1px solid #E5DFD6", overflow: "hidden", marginBottom: 10 }}>
@@ -2867,15 +2837,15 @@ Respond ONLY with valid JSON — no markdown, no backticks:
                         </span>
                         {finishes.slice(0, 2).map(f => (
                           <span key={f} style={{ fontSize: 10, padding: "2px 8px", borderRadius: 8,
-                            background: TIER_PAINT_FINISHES.includes(f) ? "#F5F0FA" : TIER_TWO_FINISHES.includes(f) ? "#FEF3EB" : "#F5F2ED",
-                            color: TIER_PAINT_FINISHES.includes(f) ? "#7B4F9E" : TIER_TWO_FINISHES.includes(f) ? "#8B5E3C" : "#666"
+                            background: TIER_TWO_FINISHES.includes(f) ? "#FEF3EB" : "#F5F2ED",
+                            color: TIER_TWO_FINISHES.includes(f) ? "#8B5E3C" : "#666"
                           }}>{f}</span>
                         ))}
                         {finishes.length > 2 && <span style={{ fontSize: 10, opacity: 0.4 }}>+{finishes.length - 2} more</span>}
                       </div>
                     </div>
                     <div style={{ textAlign: "right", flexShrink: 0, marginLeft: 12 }}>
-                      <div style={{ fontFamily: "'Playfair Display', serif", fontSize: 22, color: isPaint ? "#7B4F9E" : "#C4956A" }}>{fmt(q.totalSell)}</div>
+                      <div style={{ fontFamily: "'Playfair Display', serif", fontSize: 22, color: "#C4956A" }}>{fmt(q.totalSell)}</div>
                     </div>
                   </div>
 
@@ -2905,17 +2875,22 @@ Respond ONLY with valid JSON — no markdown, no backticks:
                       // Build a printable version of this archived quote
                       const win = window.open("", "_blank");
                       const rows = q.items.map(item =>
-                        `<tr><td>${item.id}</td><td>${item.description}</td><td style="text-align:center">${item.qty}</td><td style="text-align:right">$${item.price.toLocaleString()}</td><td style="text-align:right">$${(item.price*item.qty).toLocaleString()}</td></tr>`
+                        `<tr><td>${item.id}</td><td>${item.description}</td><td>${item.finish}</td><td style="text-align:center">${item.qty}</td><td style="text-align:right;opacity:0.5;text-decoration:line-through">${fmt(lineRetail(item))}</td><td style="text-align:right">${fmt(item.price)}</td><td style="text-align:right">${fmt(item.price*item.qty)}</td></tr>`
                       ).join("");
+                      const qRetail = q.items.reduce((s, c) => s + lineRetail(c) * c.qty, 0);
+                      const discountLine = q.discount != null
+                        ? `<div class="meta" style="text-align:right;margin-top:12px">Retail value ${fmt(qRetail)} · ${Math.round(q.discount * 100)}% off · you save ${fmt(qRetail - q.totalSell)}</div>`
+                        : "";
                       win.document.write(`<!DOCTYPE html><html><head><title>${q.name}</title>
                         <style>body{font-family:sans-serif;padding:32px;color:#1a1a1a}h1{font-size:22px;margin:0}h2{font-size:14px;font-weight:400;opacity:0.5;margin:4px 0 24px}table{width:100%;border-collapse:collapse;font-size:13px}th{text-align:left;padding:8px 10px;background:#f5f2ed;border-bottom:2px solid #d4cbb8}td{padding:8px 10px;border-bottom:1px solid #ede9e2}.total{font-size:16px;font-weight:700;text-align:right;padding-top:12px;color:#C4956A}.meta{font-size:11px;opacity:0.4;margin-bottom:4px}</style>
                       </head><body>
                         <div class="meta">ALFA STUDIO · CABINET QUOTE</div>
                         <h1>${q.name}</h1>
                         <h2>${dateStr} · ${q.items.reduce((s,c)=>s+c.qty,0)} cabinets</h2>
-                        <table><thead><tr><th>SKU</th><th>Description</th><th style="text-align:center">Qty</th><th style="text-align:right">Unit</th><th style="text-align:right">Total</th></tr></thead>
+                        <table><thead><tr><th>SKU</th><th>Description</th><th>Finish</th><th style="text-align:center">Qty</th><th style="text-align:right">Retail</th><th style="text-align:right">Your Price</th><th style="text-align:right">Total</th></tr></thead>
                         <tbody>${rows}</tbody></table>
-                        <div class="total">$${q.totalSell.toLocaleString()}</div>
+                        ${discountLine}
+                        <div class="total">${fmt(q.totalSell)}</div>
                         <script>window.print();window.close();<\/script>
                       </body></html>`);
                       win.document.close();
@@ -2946,7 +2921,7 @@ Respond ONLY with valid JSON — no markdown, no backticks:
 
               {quotes.map((q) => {
                 const qCount = q.items.reduce((s, i) => s + i.qty, 0);
-                const qSell = q.items.reduce((s, i) => s + i.price * i.qty, 0) + q.items.reduce((s,i)=>s+i.qty,0)*ASSEMBLY_FEE + SHIPPING_FEE;
+                const qSell = pricedItems(q).reduce((s, i) => s + i.price * i.qty, 0) + qCount * ASSEMBLY_FEE + SHIPPING_FEE;
                 const isActive = q.id === activeQuoteId;
                 return (
                   <div key={q.id} style={{
@@ -3083,7 +3058,7 @@ Respond ONLY with valid JSON — no markdown, no backticks:
                         <div style={{ fontSize: 12, lineHeight: 1.3 }}>{c.description}</div>
                       </div>
                       <div style={{ textAlign: "right", flexShrink: 0 }}>
-                        <div style={{ fontSize: 12, color: "#C4956A", fontWeight: 600 }}>{fmt(getSellPrice(c, currentFinish))}</div>
+                        <div style={{ fontSize: 12, color: "#C4956A", fontWeight: 600 }}>{fmt(applyDiscount(getMFCRetail(c, currentFinish), discount))}</div>
                         <div style={{ fontSize: 9, opacity: 0.4 }}>sell</div>
                       </div>
                       {isCurrent && <span style={{ fontSize: 11, color: "#4a7c59", fontWeight: 700 }}>✓</span>}
@@ -3101,9 +3076,7 @@ Respond ONLY with valid JSON — no markdown, no backticks:
         const { itemIdx, newFinish } = pendingFinishChange;
         const item = cart[itemIdx];
         const oldFinish = item?.finish;
-        const isPaintNew = TIER_PAINT_FINISHES.includes(newFinish);
-        const isPaintOld = TIER_PAINT_FINISHES.includes(oldFinish);
-        const finishColor = isPaintNew ? "#7B4F9E" : TIER_TWO_FINISHES.includes(newFinish) ? "#C4956A" : "#4a7c59";
+        const finishColor = TIER_TWO_FINISHES.includes(newFinish) ? "#C4956A" : "#4a7c59";
         return (
           <div className="sheet-overlay" onClick={() => setPendingFinishChange(null)}>
             <div className="sheet" onClick={e => e.stopPropagation()} style={{ paddingBottom: 32 }}>
@@ -3229,32 +3202,6 @@ Respond ONLY with valid JSON — no markdown, no backticks:
                 {isItemPicker ? `FINISH — ${cart[finishPickerFor.itemIdx]?.id}` : "SELECT FINISH"}
               </div>
 
-              {/* Paint Grade — featured at top */}
-              <div style={{ margin: "0 14px 14px", background: "linear-gradient(135deg, #F5F0FA, #EDE5F8)", borderRadius: 12, border: "1.5px solid #C4A8E0", overflow: "hidden" }}>
-                <div style={{ padding: "10px 14px 4px", display: "flex", alignItems: "center", gap: 8 }}>
-                  <span style={{ fontSize: 16 }}>🎨</span>
-                  <div>
-                    <div style={{ fontSize: 12, fontWeight: 700, color: "#7B4F9E", letterSpacing: 0.5 }}>PAINT GRADE</div>
-                    <div style={{ fontSize: 10, color: "#7B4F9E", opacity: 0.6 }}>Custom painted · 2.0× Tier 1 retail</div>
-                  </div>
-                </div>
-                {TIER_PAINT_FINISHES.map((f) => (
-                  <div key={f} onClick={() => pick(f)} style={{
-                    display: "flex", justifyContent: "space-between", alignItems: "center",
-                    padding: "12px 14px", cursor: "pointer", borderTop: "1px solid #C4A8E040"
-                  }}>
-                    <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                      <span style={{ width: 12, height: 12, borderRadius: "50%", background: "linear-gradient(135deg,#f0e6ff,#7B4F9E)", display: "inline-block", border: "1.5px solid #7B4F9E88", flexShrink: 0 }}></span>
-                      <span style={{ fontSize: 14, color: "#7B4F9E", fontWeight: 600 }}>{f}</span>
-                    </div>
-                    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                      <span style={{ fontSize: 10, color: "#7B4F9E", opacity: 0.6, background: "#7B4F9E18", padding: "2px 8px", borderRadius: 8 }}>2× retail</span>
-                      {currentFinish === f && <span style={{ color: "#4a7c59", fontSize: 16 }}>✓</span>}
-                    </div>
-                  </div>
-                ))}
-              </div>
-
               <div style={{ padding: "4px 18px 8px", fontSize: 11, color: "#8B7355", letterSpacing: 1 }}>TIER ONE</div>
               {TIER_ONE_FINISHES.map((f) => (
                 <div key={f} className="finish-option" onClick={() => pick(f)}>
@@ -3269,11 +3216,10 @@ Respond ONLY with valid JSON — no markdown, no backticks:
                   {currentFinish === f && <span style={{ color: "#4a7c59", fontSize: 16 }}>✓</span>}
                 </div>
               ))}
-              ))}
               {/* Box section */}
               <div style={{ padding: "12px 18px 6px", borderTop: "1px solid #EDE9E2", marginTop: 4 }}>
                 <div style={{ fontSize: 11, color: "#2563EB", letterSpacing: 1, marginBottom: 2 }}>📦 MODERNFORM BOX</div>
-                <div style={{ fontSize: 10, opacity: 0.45, marginBottom: 6 }}>Carcass only · sell at 2× your cost</div>
+                <div style={{ fontSize: 10, opacity: 0.45, marginBottom: 6 }}>Carcass only · no J&K equivalent</div>
               </div>
               {TIER_BOX_FINISHES.map((f) => (
                 <div key={f} className="finish-option" onClick={() => pick(f)}>
