@@ -1001,10 +1001,26 @@ const parseVendorResponse = (data) => {
   return order;
 };
 
+// All AI calls go through /api/claude, which needs the AI password (Vercel env AI_PASSWORD).
+// Asked for once, then remembered in this browser.
+const AI_PASSWORD_KEY = "ai-password";
+const callClaude = async (headers, body) => {
+  let password = null;
+  try { password = localStorage.getItem(AI_PASSWORD_KEY); } catch {}
+  if (!password) password = window.prompt("Enter the AI password to use scanning:");
+  if (!password) throw new Error("The AI password is needed to read files.");
+  const resp = await fetch("/api/claude", { method: "POST", headers: { ...headers, "x-password": password }, body: JSON.stringify(body) });
+  if (resp.status === 401) {
+    try { localStorage.removeItem(AI_PASSWORD_KEY); } catch {}
+    throw new Error("Wrong AI password — try again.");
+  }
+  try { localStorage.setItem(AI_PASSWORD_KEY, password); } catch {}
+  return resp.json();
+};
+
 const readVendorOrder = async (file) => {
   const { headers, body } = buildVendorRequest(file);
-  const resp = await fetch("/api/claude", { method: "POST", headers, body: JSON.stringify(body) });
-  return parseVendorResponse(await resp.json());
+  return parseVendorResponse(await callClaude(headers, body));
 };
 
 const getPrice = getMFCRetail;
@@ -2392,17 +2408,11 @@ Respond ONLY with valid JSON — no markdown, no backticks:
             const headers = { "Content-Type": "application/json" };
             if (scanImage.isPdf) headers["anthropic-beta"] = "pdfs-2024-09-25";
 
-            const resp = await fetch("/api/claude", {
-              method: "POST",
-              headers,
-              body: JSON.stringify({
-                model: "claude-sonnet-4-20250514",
-                max_tokens: 8000,
-                messages: [{ role: "user", content: [contentBlock, { type: "text", text: prompt }] }]
-              })
+            const data = await callClaude(headers, {
+              model: "claude-sonnet-4-20250514",
+              max_tokens: 8000,
+              messages: [{ role: "user", content: [contentBlock, { type: "text", text: prompt }] }]
             });
-
-            const data = await resp.json();
 
             // Surface API errors clearly
             if (data.error) throw new Error(`API error ${data.error.type}: ${data.error.message}`);
