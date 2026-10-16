@@ -1001,26 +1001,32 @@ const parseVendorResponse = (data) => {
   return order;
 };
 
-// /api/quotes and /api/claude both need the app password (Vercel env AI_PASSWORD).
-// Asked for once, then remembered in this browser; forgotten when the server rejects it.
+// /api/quotes and /api/claude need the app password only if AI_PASSWORD is set in Vercel.
+// The app asks only when the server says 401, then remembers it in this browser.
 const APP_PASSWORD_KEY = "ai-password";
-const getAppPassword = () => {
-  let password = null;
-  try { password = localStorage.getItem(APP_PASSWORD_KEY); } catch {}
-  return password || window.prompt("Enter the Alfa Studio password:") || null;
-};
 const keepAppPassword   = (password) => { try { localStorage.setItem(APP_PASSWORD_KEY, password); } catch {} };
 const forgetAppPassword = () => { try { localStorage.removeItem(APP_PASSWORD_KEY); } catch {} };
 
-const callClaude = async (headers, body) => {
-  const password = getAppPassword();
-  if (!password) throw new Error("The password is needed to read files.");
-  const resp = await fetch("/api/claude", { method: "POST", headers: { ...headers, "x-password": password }, body: JSON.stringify(body) });
+// Returns { resp, password } — password is what the server accepted (null when none was needed)
+const fetchWithPassword = async (url, opts = {}) => {
+  const send = (password) => fetch(url, { ...opts, headers: { ...(opts.headers || {}), ...(password ? { "x-password": password } : {}) } });
+  let password = null;
+  try { password = localStorage.getItem(APP_PASSWORD_KEY); } catch {}
+  let resp = await send(password);
   if (resp.status === 401) {
     forgetAppPassword();
-    throw new Error("Wrong password — try again.");
+    password = window.prompt("Enter the Alfa Studio password:") || null;
+    if (!password) return { resp, password: null };
+    resp = await send(password);
   }
-  keepAppPassword(password);
+  if (resp.status === 401) { forgetAppPassword(); return { resp, password: null }; }
+  if (password && resp.ok) keepAppPassword(password);
+  return { resp, password };
+};
+
+const callClaude = async (headers, body) => {
+  const { resp } = await fetchWithPassword("/api/claude", { method: "POST", headers, body: JSON.stringify(body) });
+  if (resp.status === 401) throw new Error("Wrong password — try again.");
   return resp.json();
 };
 
@@ -1237,21 +1243,18 @@ function App() {
   const [archivedQuotes, setArchivedQuotes] = useState([]);
   const [historySearch, setHistorySearch] = useState("");
 
-  // Server password, kept only once the server accepted it. Saves go to the server only
-  // when the load came from the server, so a local-only copy never overwrites shared quotes.
-  const [serverPassword, setServerPassword] = useState(null);
+  // Set once quotes loaded from the server ({ password } — null password when none is needed).
+  // Saves go to the server only then, so a local-only copy never overwrites shared quotes.
+  const [serverSync, setServerSync] = useState(null);
 
   // Load from the server on mount, fall back to localStorage without the password
   useEffect(() => {
     const load = async () => {
-      const password = getAppPassword();
-      if (password) try {
-        const r = await fetch("/api/quotes", { headers: { "x-password": password } });
-        if (r.status === 401) forgetAppPassword();
+      try {
+        const { resp: r, password } = await fetchWithPassword("/api/quotes");
         if (r.ok) {
           const data = await r.json();
-          keepAppPassword(password);
-          setServerPassword(password);
+          setServerSync({ password });
           if (data.quotes?.length)     setQuotes(data.quotes);
           if (data.nextId)             setNextId(data.nextId);
           if (data.activeQuoteId)      setActiveQuoteId(data.activeQuoteId);
@@ -1288,14 +1291,14 @@ function App() {
         localStorage.setItem("quotes-state", JSON.stringify({ quotes, nextId, activeQuoteId }));
         localStorage.setItem("archived-quotes", JSON.stringify(archivedQuotes));
       } catch {}
-      if (!serverPassword) { setSaveStatus("idle"); return; } // local-only session
+      if (!serverSync) { setSaveStatus("idle"); return; } // local-only session
       try {
         const r = await fetch("/api/quotes", {
           method: "POST",
-          headers: { "Content-Type": "application/json", "x-password": serverPassword },
+          headers: { "Content-Type": "application/json", ...(serverSync.password ? { "x-password": serverSync.password } : {}) },
           body: JSON.stringify(payload),
         });
-        if (r.status === 401) { forgetAppPassword(); setServerPassword(null); }
+        if (r.status === 401) { forgetAppPassword(); setServerSync(null); }
         setSaveStatus(r.ok ? "saved" : "error");
       } catch {
         setSaveStatus("error"); // server unreachable — localStorage backup still worked
@@ -1303,7 +1306,7 @@ function App() {
       setTimeout(() => setSaveStatus("idle"), 2000);
     }, 1500);
     return () => clearTimeout(t);
-  }, [quotes, nextId, activeQuoteId, archivedQuotes, storageReady, serverPassword]);
+  }, [quotes, nextId, activeQuoteId, archivedQuotes, storageReady, serverSync]);
 
   // Archive a quote to history
   const archiveQuote = useCallback((quoteId) => {
@@ -1570,7 +1573,7 @@ function App() {
               {saveStatus === "saving" && <div style={{ fontSize: 8, color: "#C4956A", opacity: 0.7 }}>● saving…</div>}
               {saveStatus === "saved"  && <div style={{ fontSize: 8, color: "#4a7c59", opacity: 0.8 }}>✓ saved</div>}
               {saveStatus === "error"  && <div style={{ fontSize: 8, color: "#aaa",    opacity: 0.6 }}>⚠ save failed</div>}
-              {storageReady && !serverPassword && (
+              {storageReady && !serverSync && (
                 <button onClick={() => { forgetAppPassword(); window.location.reload(); }} title="Quotes aren't syncing — tap to enter the password"
                   style={{ fontSize: 8, color: "#C4956A", background: "none", border: "none", padding: 0, cursor: "pointer", fontFamily: "inherit" }}>
                   ⚠ local only · sign in

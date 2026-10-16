@@ -1,7 +1,8 @@
 import { timingSafeEqual } from 'crypto';
 
 // Proxy to the Anthropic Messages API.
-// Env vars needed: ANTHROPIC_API_KEY, AI_PASSWORD (typed into the app once; never in the page source)
+// Env vars needed: ANTHROPIC_API_KEY. Optional: AI_PASSWORD — when set, callers must send it
+// (typed into the app once; never in the page source). When unset, the route is open.
 
 // Only what the app itself sends gets through
 const ALLOWED_MODELS = new Set(['claude-opus-5-5', 'claude-sonnet-4-20250514']);
@@ -10,14 +11,14 @@ const MAX_TOKENS     = 16000;
 
 const passwordOk = (given) => {
   const expected = process.env.AI_PASSWORD;
-  if (!expected || typeof given !== 'string') return false;
+  if (!expected) return true;
+  if (typeof given !== 'string') return false;
   const a = Buffer.from(given), b = Buffer.from(expected);
   return a.length === b.length && timingSafeEqual(a, b);
 };
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
-  if (!process.env.AI_PASSWORD) return res.status(503).json({ error: { type: 'config_error', message: 'AI_PASSWORD is not set on the server' } });
   if (!passwordOk(req.headers['x-password'])) return res.status(401).json({ error: { type: 'auth_error', message: 'Wrong AI password' } });
 
   const body = req.body || {};

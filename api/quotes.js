@@ -1,6 +1,6 @@
 // Quote storage via GitHub — saves quotes.json directly to your repo
 // Env vars needed: GITHUB_TOKEN, GITHUB_REPO (e.g. "username/reponame"),
-// AI_PASSWORD (the app password, shared with /api/claude; never in the page source)
+// optional AI_PASSWORD (the app password, shared with /api/claude; when unset the route is open)
 import { timingSafeEqual } from "crypto";
 
 const TOKEN = process.env.GITHUB_TOKEN;
@@ -10,7 +10,8 @@ const BRANCH = "main";
 
 const passwordOk = (given) => {
   const expected = process.env.AI_PASSWORD;
-  if (!expected || typeof given !== "string") return false;
+  if (!expected) return true;
+  if (typeof given !== "string") return false;
   const a = Buffer.from(given), b = Buffer.from(expected);
   return a.length === b.length && timingSafeEqual(a, b);
 };
@@ -37,7 +38,6 @@ async function ghPut(data, sha) {
 }
 
 export default async function handler(req, res) {
-  if (!process.env.AI_PASSWORD) return res.status(503).json({ error: "AI_PASSWORD is not set on the server" });
   if (!passwordOk(req.headers["x-password"])) return res.status(401).json({ error: "Unauthorized" });
   if (!TOKEN || !REPO) return res.status(503).json({ error: "Storage not configured" });
 
