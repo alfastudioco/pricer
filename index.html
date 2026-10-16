@@ -1001,20 +1001,26 @@ const parseVendorResponse = (data) => {
   return order;
 };
 
-// All AI calls go through /api/claude, which needs the AI password (Vercel env AI_PASSWORD).
-// Asked for once, then remembered in this browser.
-const AI_PASSWORD_KEY = "ai-password";
-const callClaude = async (headers, body) => {
+// /api/quotes and /api/claude both need the app password (Vercel env AI_PASSWORD).
+// Asked for once, then remembered in this browser; forgotten when the server rejects it.
+const APP_PASSWORD_KEY = "ai-password";
+const getAppPassword = () => {
   let password = null;
-  try { password = localStorage.getItem(AI_PASSWORD_KEY); } catch {}
-  if (!password) password = window.prompt("Enter the AI password to use scanning:");
-  if (!password) throw new Error("The AI password is needed to read files.");
+  try { password = localStorage.getItem(APP_PASSWORD_KEY); } catch {}
+  return password || window.prompt("Enter the Alfa Studio password:") || null;
+};
+const keepAppPassword   = (password) => { try { localStorage.setItem(APP_PASSWORD_KEY, password); } catch {} };
+const forgetAppPassword = () => { try { localStorage.removeItem(APP_PASSWORD_KEY); } catch {} };
+
+const callClaude = async (headers, body) => {
+  const password = getAppPassword();
+  if (!password) throw new Error("The password is needed to read files.");
   const resp = await fetch("/api/claude", { method: "POST", headers: { ...headers, "x-password": password }, body: JSON.stringify(body) });
   if (resp.status === 401) {
-    try { localStorage.removeItem(AI_PASSWORD_KEY); } catch {}
-    throw new Error("Wrong AI password — try again.");
+    forgetAppPassword();
+    throw new Error("Wrong password — try again.");
   }
-  try { localStorage.setItem(AI_PASSWORD_KEY, password); } catch {}
+  keepAppPassword(password);
   return resp.json();
 };
 
@@ -1231,15 +1237,21 @@ function App() {
   const [archivedQuotes, setArchivedQuotes] = useState([]);
   const [historySearch, setHistorySearch] = useState("");
 
-  const PASS = "alfastudio"; // matches QUOTES_PASSWORD env var default
+  // Server password, kept only once the server accepted it. Saves go to the server only
+  // when the load came from the server, so a local-only copy never overwrites shared quotes.
+  const [serverPassword, setServerPassword] = useState(null);
 
-  // Load from KV on mount, fall back to localStorage if KV not set up yet
+  // Load from the server on mount, fall back to localStorage without the password
   useEffect(() => {
     const load = async () => {
-      try {
-        const r = await fetch("/api/quotes", { headers: { "x-password": PASS } });
+      const password = getAppPassword();
+      if (password) try {
+        const r = await fetch("/api/quotes", { headers: { "x-password": password } });
+        if (r.status === 401) forgetAppPassword();
         if (r.ok) {
           const data = await r.json();
+          keepAppPassword(password);
+          setServerPassword(password);
           if (data.quotes?.length)     setQuotes(data.quotes);
           if (data.nextId)             setNextId(data.nextId);
           if (data.activeQuoteId)      setActiveQuoteId(data.activeQuoteId);
@@ -1276,21 +1288,22 @@ function App() {
         localStorage.setItem("quotes-state", JSON.stringify({ quotes, nextId, activeQuoteId }));
         localStorage.setItem("archived-quotes", JSON.stringify(archivedQuotes));
       } catch {}
-      // Try KV save
+      if (!serverPassword) { setSaveStatus("idle"); return; } // local-only session
       try {
         const r = await fetch("/api/quotes", {
           method: "POST",
-          headers: { "Content-Type": "application/json", "x-password": PASS },
+          headers: { "Content-Type": "application/json", "x-password": serverPassword },
           body: JSON.stringify(payload),
         });
+        if (r.status === 401) { forgetAppPassword(); setServerPassword(null); }
         setSaveStatus(r.ok ? "saved" : "error");
       } catch {
-        setSaveStatus("error"); // KV not set up — localStorage backup still worked
+        setSaveStatus("error"); // server unreachable — localStorage backup still worked
       }
       setTimeout(() => setSaveStatus("idle"), 2000);
     }, 1500);
     return () => clearTimeout(t);
-  }, [quotes, nextId, activeQuoteId, archivedQuotes, storageReady]);
+  }, [quotes, nextId, activeQuoteId, archivedQuotes, storageReady, serverPassword]);
 
   // Archive a quote to history
   const archiveQuote = useCallback((quoteId) => {
@@ -1556,7 +1569,13 @@ function App() {
               <div style={{ fontSize: 9, letterSpacing: 3, opacity: 0.5 }}>CABINET PRICING</div>
               {saveStatus === "saving" && <div style={{ fontSize: 8, color: "#C4956A", opacity: 0.7 }}>● saving…</div>}
               {saveStatus === "saved"  && <div style={{ fontSize: 8, color: "#4a7c59", opacity: 0.8 }}>✓ saved</div>}
-              {saveStatus === "error"  && <div style={{ fontSize: 8, color: "#aaa",    opacity: 0.6 }}>⚠ local only</div>}
+              {saveStatus === "error"  && <div style={{ fontSize: 8, color: "#aaa",    opacity: 0.6 }}>⚠ save failed</div>}
+              {storageReady && !serverPassword && (
+                <button onClick={() => { forgetAppPassword(); window.location.reload(); }} title="Quotes aren't syncing — tap to enter the password"
+                  style={{ fontSize: 8, color: "#C4956A", background: "none", border: "none", padding: 0, cursor: "pointer", fontFamily: "inherit" }}>
+                  ⚠ local only · sign in
+                </button>
+              )}
             </div>
           </div>
           <div style={{ display: "flex", gap: 8, alignItems: "center" }}>

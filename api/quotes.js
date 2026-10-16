@@ -1,11 +1,19 @@
 // Quote storage via GitHub — saves quotes.json directly to your repo
-// Env vars needed: GITHUB_TOKEN, GITHUB_REPO (e.g. "username/reponame")
+// Env vars needed: GITHUB_TOKEN, GITHUB_REPO (e.g. "username/reponame"),
+// AI_PASSWORD (the app password, shared with /api/claude; never in the page source)
+import { timingSafeEqual } from "crypto";
 
 const TOKEN = process.env.GITHUB_TOKEN;
 const REPO  = process.env.GITHUB_REPO;
-const PASS  = process.env.QUOTES_PASSWORD || "alfastudio";
 const FILE  = "quotes.json";
 const BRANCH = "main";
+
+const passwordOk = (given) => {
+  const expected = process.env.AI_PASSWORD;
+  if (!expected || typeof given !== "string") return false;
+  const a = Buffer.from(given), b = Buffer.from(expected);
+  return a.length === b.length && timingSafeEqual(a, b);
+};
 
 async function ghGet() {
   const r = await fetch(`https://api.github.com/repos/${REPO}/contents/${FILE}?ref=${BRANCH}`, {
@@ -29,12 +37,8 @@ async function ghPut(data, sha) {
 }
 
 export default async function handler(req, res) {
-  res.setHeader("Access-Control-Allow-Origin", "*");
-  res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
-  res.setHeader("Access-Control-Allow-Headers", "Content-Type, x-password");
-  if (req.method === "OPTIONS") return res.status(200).end();
-
-  if (req.headers["x-password"] !== PASS) return res.status(401).json({ error: "Unauthorized" });
+  if (!process.env.AI_PASSWORD) return res.status(503).json({ error: "AI_PASSWORD is not set on the server" });
+  if (!passwordOk(req.headers["x-password"])) return res.status(401).json({ error: "Unauthorized" });
   if (!TOKEN || !REPO) return res.status(503).json({ error: "Storage not configured" });
 
   try {
